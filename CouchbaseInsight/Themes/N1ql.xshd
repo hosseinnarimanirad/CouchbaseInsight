@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    SQL++ (N1QL) highlighting for the WHERE editor and the statement preview.
+
+    Backticked identifiers get the same colour as a JSON key, because that is what they are: the
+    WHERE builder writes `type` = 'user' from a field name and a value, and colouring the two halves
+    differently is what makes a mistyped quote visible before the query runs.
+
+    As with Json.xshd the foregrounds here are defaults only — SyntaxThemes replaces them from the
+    active theme at runtime.
+-->
+<SyntaxDefinition name="N1QL" xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+
+  <Color name="Keyword" foreground="#6FB6FF" fontWeight="bold" />
+  <Color name="Function" foreground="#C0A0F5" />
+  <Color name="Key" foreground="#6FB6FF" />
+  <Color name="String" foreground="#7CD6A0" />
+  <Color name="Number" foreground="#F0A868" />
+  <Color name="Literal" foreground="#C0A0F5" />
+  <Color name="Comment" foreground="#6E7A89" />
+
+  <RuleSet ignoreCase="true">
+
+    <Span color="Comment" begin="--" />
+    <Span color="Comment" multiline="true" begin="/\*" end="\*/" />
+
+    <Span color="String">
+      <Begin>'</Begin>
+      <End>'</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <Span color="Key">
+      <Begin>`</Begin>
+      <End>`</End>
+    </Span>
+
+    <Keywords color="Keyword">
+      <Word>SELECT</Word><Word>FROM</Word><Word>WHERE</Word><Word>AND</Word><Word>OR</Word>
+      <Word>NOT</Word><Word>IN</Word><Word>WITHIN</Word><Word>LIKE</Word><Word>IS</Word>
+      <Word>NULL</Word><Word>MISSING</Word><Word>VALUED</Word><Word>DISTINCT</Word><Word>RAW</Word>
+      <Word>ORDER</Word><Word>BY</Word><Word>GROUP</Word><Word>HAVING</Word><Word>LIMIT</Word>
+      <Word>OFFSET</Word><Word>AS</Word><Word>ON</Word><Word>JOIN</Word><Word>LEFT</Word>
+      <Word>INNER</Word><Word>OUTER</Word><Word>UNNEST</Word><Word>NEST</Word><Word>USE</Word>
+      <Word>KEYS</Word><Word>UNION</Word><Word>INTERSECT</Word><Word>EXCEPT</Word><Word>ALL</Word>
+      <Word>ANY</Word><Word>EVERY</Word><Word>SATISFIES</Word><Word>END</Word><Word>CASE</Word>
+      <Word>WHEN</Word><Word>THEN</Word><Word>ELSE</Word><Word>ASC</Word><Word>DESC</Word>
+      <Word>BETWEEN</Word><Word>EXISTS</Word><Word>LET</Word><Word>WITH</Word><Word>VALUE</Word>
+    </Keywords>
+
+    <Keywords color="Literal">
+      <Word>TRUE</Word><Word>FALSE</Word>
+    </Keywords>
+
+    <Keywords color="Function">
+      <Word>COUNT</Word><Word>MIN</Word><Word>MAX</Word><Word>SUM</Word><Word>AVG</Word>
+      <Word>ARRAY_LENGTH</Word><Word>META</Word><Word>TOSTRING</Word><Word>TONUMBER</Word>
+      <Word>IFMISSING</Word><Word>IFNULL</Word><Word>LOWER</Word><Word>UPPER</Word>
+      <Word>SPLIT</Word><Word>SUBSTR</Word><Word>CONTAINS</Word><Word>LENGTH</Word>
+      <Word>NOW_STR</Word><Word>DATE_PART_STR</Word><Word>MILLIS_TO_STR</Word>
+    </Keywords>
+
+    <Rule color="Number">-?\d+(\.\d+)?([eE][+-]?\d+)?</Rule>
+
+  </RuleSet>
+</SyntaxDefinition>

@@ -1,11 +1,25 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
+using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CouchbaseInsight.Models;
 using CouchbaseInsight.Services;
 
 namespace CouchbaseInsight.ViewModels;
+
+/// <summary>
+/// What the status line is reporting. Drives the colour of the dot in front of it — the one thing
+/// on the window that says "the last thing you asked for worked" without being read.
+/// </summary>
+public enum StatusKind
+{
+    Idle,
+    Busy,
+    Ok,
+    Error
+}
 
 public partial class MainViewModel : ObservableObject
 {
@@ -20,6 +34,14 @@ public partial class MainViewModel : ObservableObject
         _store = store;
 
         foreach (var p in profiles) SavedConnections.Add(p);
+
+        // Filtering runs through the default views, so the lists the window binds to and the views
+        // filtered here are the same object — there is no second copy to keep in step.
+        ClassesView = CollectionViewSource.GetDefaultView(Classes);
+        ClassesView.Filter = o => Matches(o as string, ClassFilter);
+
+        FieldsView = CollectionViewSource.GetDefaultView(Fields);
+        FieldsView.Filter = o => Matches((o as FieldInfo)?.Name, FieldFilter);
 
         // Select the first saved profile, which populates the connection fields. When none are
         // saved, the fields stay blank and external-network defaults to false.
@@ -48,6 +70,17 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _password = "";
     [ObservableProperty] private bool _useNetworkResolutionExternal;
 
+    /// <summary>
+    /// Whether the connection form is showing. It is open on launch, because connecting is the
+    /// first thing to do, and folds away on a successful connect, because after that it is a form
+    /// holding a screenful of space for details nobody is going to read again this session.
+    /// </summary>
+    [ObservableProperty] private bool _isConnectionPanelOpen = true;
+
+    /// <summary>The one-line "who am I talking to" for the title bar: host, plus how many more
+    /// seeds were in the string, plus the bucket count once they are known.</summary>
+    [ObservableProperty] private string _connectionSummary = "";
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ConnectCommand))]
     [NotifyCanExecuteChangedFor(nameof(DisconnectCommand))]
@@ -65,6 +98,7 @@ public partial class MainViewModel : ObservableObject
     private bool _isConnected;
 
     [ObservableProperty] private string _status = "Not connected.";
+    [ObservableProperty] private StatusKind _statusLevel = StatusKind.Idle;
 
     /// <summary>
     /// Detail behind <see cref="Status"/>: the connect report after a Connect attempt, or the
@@ -86,6 +120,20 @@ public partial class MainViewModel : ObservableObject
     public ObservableCollection<FieldInfo> Fields { get; } = new();
     public ObservableCollection<FieldInfo> QueryFields { get; } = new();
     public ObservableCollection<string> DistinctValues { get; } = new();
+
+    /// <summary>The filtered views the window binds to. Same underlying collections as above.</summary>
+    public ICollectionView ClassesView { get; }
+    public ICollectionView FieldsView { get; }
+
+    [ObservableProperty] private string _classFilter = "";
+    [ObservableProperty] private string _fieldFilter = "";
+
+    partial void OnClassFilterChanged(string value) => ClassesView.Refresh();
+    partial void OnFieldFilterChanged(string value) => FieldsView.Refresh();
+
+    private static bool Matches(string? candidate, string filter) =>
+        string.IsNullOrWhiteSpace(filter) ||
+        (candidate?.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase) ?? false);
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SyncFromSelectionCommand))]
@@ -109,20 +157,70 @@ public partial class MainViewModel : ObservableObject
     private string? _selectedClass;
 
     [ObservableProperty] private FieldInfo? _selectedField;
-    [ObservableProperty] private string _distinctValuesHeader = "Distinct Values";
+    [ObservableProperty] private string _distinctValuesHeader = "Distinct values";
     [ObservableProperty] private bool _analyzeAll;
-    [ObservableProperty] private string _schemaSummary = "";
+
+    // ---- Schema headline numbers ----
+    // One property per number rather than one sentence containing all of them: the pane header
+    // shows them as separate pills, and a pill you can colour is a pill you can find.
+    [ObservableProperty] private string _analyzedClass = "";
+    [ObservableProperty] private int _fieldCount;
+    [ObservableProperty] private int _requiredCount;
+    [ObservableProperty] private int _issueCount;
+    [ObservableProperty] private int _sampleSize;
+
+    public bool HasSchema => FieldCount > 0;
+
+    partial void OnFieldCountChanged(int value) => OnPropertyChanged(nameof(HasSchema));
 
     // ---- Query ----
-    [ObservableProperty] private string _selectExpression = "*";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QueryPreview))]
+    private string _selectExpression = "*";
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
+    [NotifyPropertyChangedFor(nameof(QueryPreview))]
     private string _fromKeyspace = "";
 
-    [ObservableProperty] private string _whereClause = "";
-    [ObservableProperty] private string _queryResult = "";
-    [ObservableProperty] private string _queryResultCountLabel = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QueryPreview))]
+    private string _whereClause = "";
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CopyQueryResultCommand))]
+    private string _queryResult = "";
+
+    [ObservableProperty] private int _queryRowCount = -1;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CancelQueryCommand))]
+    private bool _isQueryRunning;
+
+    /// <summary>
+    /// The builder writes a statement; this hands it over to be edited by hand. Everything the
+    /// three fields above cannot express — a JOIN, an ORDER BY, a LIMIT, a subquery — lives behind
+    /// this switch, and switching it on seeds the editor with whatever the builder had composed so
+    /// far rather than with a blank page.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
+    [NotifyPropertyChangedFor(nameof(QueryPreview))]
+    private bool _isRawQuery;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
+    [NotifyPropertyChangedFor(nameof(QueryPreview))]
+    private string _rawStatement = "";
+
+    partial void OnIsRawQueryChanged(bool value)
+    {
+        if (value && string.IsNullOrWhiteSpace(RawStatement))
+            RawStatement = ComposedStatement();
+    }
+
+    /// <summary>Exactly what Run will send, composed or hand-written.</summary>
+    public string QueryPreview => IsRawQuery ? RawStatement : ComposedStatement();
 
     private CancellationTokenSource? _queryCts;
 
@@ -163,6 +261,9 @@ public partial class MainViewModel : ObservableObject
         UseNetworkResolutionExternal = value.UseNetworkResolutionExternal;
     }
 
+    [RelayCommand]
+    private void ToggleConnectionPanel() => IsConnectionPanelOpen = !IsConnectionPanelOpen;
+
     [RelayCommand(CanExecute = nameof(CanSaveConnection))]
     private void SaveConnection()
     {
@@ -182,7 +283,7 @@ public partial class MainViewModel : ObservableObject
 
         _store.Save(SavedConnections);
         SelectedConnection = profile;
-        Status = $"Saved connection '{name}'.";
+        Report($"Saved connection '{name}'.", StatusKind.Ok);
     }
 
     private bool CanSaveConnection() =>
@@ -196,7 +297,7 @@ public partial class MainViewModel : ObservableObject
         SavedConnections.Remove(profile);
         _store.Save(SavedConnections);
         SelectedConnection = SavedConnections.FirstOrDefault();
-        Status = $"Deleted connection '{profile.Name}'.";
+        Report($"Deleted connection '{profile.Name}'.", StatusKind.Ok);
     }
 
     private bool CanDeleteConnection() => SelectedConnection is not null;
@@ -219,8 +320,15 @@ public partial class MainViewModel : ObservableObject
             var buckets = await _couchbase.GetBucketsAsync();
             foreach (var b in buckets) Buckets.Add(b);
 
-            Status = $"Connected. {Buckets.Count} bucket(s) found.";
+            ConnectionSummary = DescribeTarget();
+
+            // The form has done its job; the rest of the window is what matters now.
+            IsConnectionPanelOpen = false;
+            Report($"Connected. {Buckets.Count} bucket(s) found.", StatusKind.Ok);
         });
+
+        // A failed connect is a form to correct, so put the form back.
+        if (!IsConnected) IsConnectionPanelOpen = true;
     }
 
     private bool CanConnect() => !IsBusy && !string.IsNullOrWhiteSpace(ConnectionString);
@@ -233,7 +341,9 @@ public partial class MainViewModel : ObservableObject
             await _couchbase.DisconnectAsync();
             IsConnected = false;
             ResetHierarchy();
-            Status = "Disconnected.";
+            ConnectionSummary = "";
+            IsConnectionPanelOpen = true;
+            Report("Disconnected.", StatusKind.Idle);
         });
     }
 
@@ -252,9 +362,11 @@ public partial class MainViewModel : ObservableObject
                 SelectedBucket!, SelectedScope!.Name, SelectedCollection!, Discriminator);
             foreach (var c in classes) Classes.Add(c);
 
-            Status = classes.Count == 0
-                ? $"No values found for discriminator '{Discriminator}'. Try another field."
-                : $"{classes.Count} class(es) found.";
+            if (classes.Count == 0)
+                Report($"No values found for discriminator '{Discriminator}'. Try another field.",
+                       StatusKind.Error);
+            else
+                Report($"{classes.Count} class(es) found.", StatusKind.Ok);
         });
     }
 
@@ -278,19 +390,14 @@ public partial class MainViewModel : ObservableObject
 
             foreach (var f in schema.Fields) Fields.Add(f);
 
-            var required = schema.Fields.Count(f => f.IsRequired);
-            var caseDups = schema.Fields.Count(f => f.HasCaseDuplicate);
-            var multiType = schema.Fields.Count(f => f.HasMultipleTypes);
+            AnalyzedClass = schema.ClassName;
+            SampleSize = schema.SampleSize;
+            FieldCount = schema.Fields.Count;
+            RequiredCount = schema.Fields.Count(f => f.IsRequired);
+            IssueCount = schema.Fields.Count(f => f.HasCaseDuplicate || f.HasMultipleTypes);
 
-            var summary = $"'{schema.ClassName}': {schema.Fields.Count} field(s) " +
-                          $"({required} required, {schema.Fields.Count - required} optional) " +
-                          $"from {schema.SampleSize} doc(s).";
-
-            if (caseDups > 0) summary += $" | {caseDups} case conflict(s)";
-            if (multiType > 0) summary += $" | {multiType} multi-type field(s)";
-
-            SchemaSummary = summary;
-            Status = "Analysis complete.";
+            Report($"Analyzed '{schema.ClassName}' over {schema.SampleSize} document(s).",
+                   StatusKind.Ok);
         });
     }
 
@@ -315,7 +422,7 @@ public partial class MainViewModel : ObservableObject
             var fields = await _couchbase.GetCollectionFieldsAsync(
                 SelectedBucket!, SelectedScope!.Name, SelectedCollection!);
             foreach (var f in fields) QueryFields.Add(f);
-            Status = $"Synced — {QueryFields.Count} field(s) discovered.";
+            Report($"Synced — {QueryFields.Count} field(s) discovered.", StatusKind.Ok);
         });
     }
 
@@ -357,35 +464,58 @@ public partial class MainViewModel : ObservableObject
         var ct = _queryCts.Token;
 
         IsBusy = true;
-        Status = "Running query…";
+        IsQueryRunning = true;
+        Report("Running query…", StatusKind.Busy);
         QueryResult = "";
-        QueryResultCountLabel = "";
+        QueryRowCount = -1;
         try
         {
-            var (count, json) = await _couchbase.RunQueryAsync(BuildQuery(), ct);
+            var (count, json) = await _couchbase.RunQueryAsync(QueryPreview, ct);
             QueryResult = json;
-            QueryResultCountLabel = $"Count: {count}";
-            Status = $"Query complete — {count} row(s).";
+            QueryRowCount = count;
+            Report($"Query complete — {count} row(s).", StatusKind.Ok);
         }
         catch (OperationCanceledException)
         {
-            Status = "Query cancelled.";
+            Report("Query cancelled.", StatusKind.Idle);
         }
         catch (Exception ex)
         {
-            QueryResult = $"Error:\n{ex.Message}";
-            Status = "Query failed.";
+            QueryResult = $"// {ExceptionReport.Summarize(ex)}\n\n{ExceptionReport.Describe(ex)}";
+            Report("Query failed.", StatusKind.Error);
         }
         finally
         {
+            IsQueryRunning = false;
             IsBusy = false;
         }
     }
 
     private bool CanRunQuery() =>
-        IsConnected && !IsBusy && !string.IsNullOrWhiteSpace(FromKeyspace);
+        IsConnected && !IsBusy &&
+        !string.IsNullOrWhiteSpace(IsRawQuery ? RawStatement : FromKeyspace);
 
-    private string BuildQuery()
+    [RelayCommand(CanExecute = nameof(CanCancelQuery))]
+    private void CancelQuery() => _queryCts?.Cancel();
+
+    private bool CanCancelQuery() => IsQueryRunning;
+
+    [RelayCommand(CanExecute = nameof(CanCopyQueryResult))]
+    private void CopyQueryResult() => CopyToClipboard(QueryResult, "Result");
+
+    private bool CanCopyQueryResult() => !string.IsNullOrWhiteSpace(QueryResult);
+
+    [RelayCommand]
+    private void CopyStatement() => CopyToClipboard(QueryPreview, "Statement");
+
+    [RelayCommand]
+    private void CopyDiagnostics() => CopyToClipboard(Diagnostics, "Diagnostics");
+
+    [RelayCommand]
+    private void CopyDistinctValues() =>
+        CopyToClipboard(string.Join(Environment.NewLine, DistinctValues), "Values");
+
+    private string ComposedStatement()
     {
         var sql = $"SELECT {SelectExpression} FROM {FromKeyspace}";
         if (!string.IsNullOrWhiteSpace(WhereClause))
@@ -410,7 +540,8 @@ public partial class MainViewModel : ObservableObject
         {
             var scopes = await _couchbase.GetScopesAsync(value);
             foreach (var s in scopes) Scopes.Add(s);
-            Status = $"{Scopes.Count} scope(s) in '{value}'.";
+            ConnectionSummary = DescribeTarget();
+            Report($"{Scopes.Count} scope(s) in '{value}'.", StatusKind.Ok);
         });
     }
 
@@ -443,7 +574,7 @@ public partial class MainViewModel : ObservableObject
                          .Distinct(StringComparer.Ordinal)
                          .OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
                 DiscriminatorFields.Add(name);
-            Status = $"{DiscriminatorFields.Count} field(s) available as discriminator.";
+            Report($"{DiscriminatorFields.Count} field(s) available as discriminator.", StatusKind.Ok);
         });
     }
 
@@ -455,7 +586,7 @@ public partial class MainViewModel : ObservableObject
         if (value is null || SelectedBucket is null || SelectedScope is null ||
             SelectedCollection is null || SelectedClass is null)
         {
-            DistinctValuesHeader = "Distinct Values";
+            DistinctValuesHeader = "Distinct values";
             return;
         }
 
@@ -505,14 +636,52 @@ public partial class MainViewModel : ObservableObject
         return $"'{value}'";
     }
 
+    private void Report(string message, StatusKind level)
+    {
+        Status = message;
+        StatusLevel = level;
+    }
+
+    private void CopyToClipboard(string text, string what)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        try
+        {
+            System.Windows.Clipboard.SetText(text);
+            Report($"{what} copied to the clipboard.", StatusKind.Ok);
+        }
+        catch (Exception ex)
+        {
+            // Another process can hold the clipboard open; that is not worth an error dialog.
+            Report($"Could not copy: {ex.Message}", StatusKind.Error);
+        }
+    }
+
+    /// <summary>Host and bucket for the title bar, from the connection string the SDK was given.</summary>
+    private string DescribeTarget()
+    {
+        var seeds = ConnectionStringInspector.Inspect(ConnectionString).Seeds;
+        var host = seeds.Count > 0 ? seeds[0].Host : ConnectionString;
+        var extra = seeds.Count > 1 ? $" +{seeds.Count - 1}" : "";
+        var scope = SelectedBucket is null
+            ? $"{Buckets.Count} bucket(s)"
+            : SelectedBucket;
+
+        return $"{host}{extra} · {scope}";
+    }
+
     private void ClearSchema()
     {
         CancelDistinctValues();
         Fields.Clear();
         DistinctValues.Clear();
         SelectedField = null;
-        SchemaSummary = "";
-        DistinctValuesHeader = "Distinct Values";
+        AnalyzedClass = "";
+        FieldCount = 0;
+        RequiredCount = 0;
+        IssueCount = 0;
+        SampleSize = 0;
+        DistinctValuesHeader = "Distinct values";
     }
 
     private void CancelDistinctValues()
@@ -539,14 +708,17 @@ public partial class MainViewModel : ObservableObject
     {
         if (IsBusy) return;
         IsBusy = true;
-        Status = busyMessage;
+        Report(busyMessage, StatusKind.Busy);
         try
         {
             await action();
+
+            // An action that said nothing about how it went reports success on its behalf.
+            if (StatusLevel == StatusKind.Busy) StatusLevel = StatusKind.Ok;
         }
         catch (Exception ex)
         {
-            Status = $"Error: {ExceptionReport.Summarize(ex)}";
+            Report($"Error: {ExceptionReport.Summarize(ex)}", StatusKind.Error);
             Diagnostics = ex is ClusterConnectException connectFailure
                 ? connectFailure.Report
                 : ExceptionReport.Describe(ex);

@@ -1,0 +1,65 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        Colours only. Controls.xaml reaches every one of these through DynamicResource, so swapping
+        this dictionary for Dark.xaml at index 0 repaints the whole app without reloading a single
+        template. Nothing else in the app may name a colour.
+
+        Token names match JsonInsight and DiskLens so the three tools read as one family.
+    -->
+
+    <!-- Surfaces and chrome -->
+    <SolidColorBrush x:Key="Brush.Window" Color="#F3F5F9" />
+    <SolidColorBrush x:Key="Brush.Surface" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="Brush.SurfaceAlt" Color="#EBEFF5" />
+    <SolidColorBrush x:Key="Brush.Card" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="Brush.Hover" Color="#EDF1F8" />
+    <SolidColorBrush x:Key="Brush.Selected" Color="#DEE9FC" />
+    <SolidColorBrush x:Key="Brush.Border" Color="#DBE1EA" />
+    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="#E9EDF3" />
+
+    <SolidColorBrush x:Key="Brush.Text" Color="#141C26" />
+    <SolidColorBrush x:Key="Brush.TextSecondary" Color="#5A6675" />
+    <SolidColorBrush x:Key="Brush.TextTertiary" Color="#8894A3" />
+
+    <SolidColorBrush x:Key="Brush.Accent" Color="#2E6FE0" />
+    <SolidColorBrush x:Key="Brush.AccentHover" Color="#4685EE" />
+    <SolidColorBrush x:Key="Brush.AccentPressed" Color="#255CBC" />
+    <SolidColorBrush x:Key="Brush.AccentSoft" Color="#E4EDFD" />
+    <SolidColorBrush x:Key="Brush.OnAccent" Color="#FFFFFF" />
+
+    <SolidColorBrush x:Key="Brush.Track" Color="#E6EAF1" />
+    <SolidColorBrush x:Key="Brush.Scroll" Color="#B9C2CE" />
+
+    <!--
+        The four states this tool actually reports, each with a soft partner used as a wash behind
+        text: green = connected / a field every document has, amber = a data-quality finding
+        (case conflict, more than one JSON type), red = a failure, blue = a neutral count.
+    -->
+    <SolidColorBrush x:Key="Brush.Ok" Color="#2E7D46" />
+    <SolidColorBrush x:Key="Brush.OkSoft" Color="#E7F4EB" />
+    <SolidColorBrush x:Key="Brush.Warn" Color="#A06400" />
+    <SolidColorBrush x:Key="Brush.WarnSoft" Color="#FCF2DE" />
+    <SolidColorBrush x:Key="Brush.Danger" Color="#D2413F" />
+    <SolidColorBrush x:Key="Brush.DangerSoft" Color="#FBE7E7" />
+    <SolidColorBrush x:Key="Brush.Info" Color="#1F6FB2" />
+    <SolidColorBrush x:Key="Brush.InfoSoft" Color="#E6F1FA" />
+
+    <!-- Couchbase red, used for the wordmark and nothing else. The accent above stays blue: red is
+         spoken for by Brush.Danger, and a primary button that reads as "destructive" is worse than
+         an off-brand one. -->
+    <SolidColorBrush x:Key="Brush.Brand" Color="#E5202B" />
+
+    <!-- Editor syntax. Colours rather than brushes: AvalonEdit's SimpleHighlightingBrush takes a
+         Color, and SyntaxThemes re-reads these by key whenever the theme is swapped. -->
+    <Color x:Key="Color.Syntax.Key">#0B5FB0</Color>
+    <Color x:Key="Color.Syntax.String">#1F7A46</Color>
+    <Color x:Key="Color.Syntax.Number">#A33A00</Color>
+    <Color x:Key="Color.Syntax.Literal">#7A4FBF</Color>
+    <Color x:Key="Color.Syntax.Keyword">#0B5FB0</Color>
+    <Color x:Key="Color.Syntax.Function">#7A4FBF</Color>
+    <Color x:Key="Color.Syntax.Punctuation">#6B7683</Color>
+    <Color x:Key="Color.Syntax.Comment">#8894A3</Color>
+
+</ResourceDictionary>

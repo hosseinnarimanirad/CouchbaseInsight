@@ -1,0 +1,52 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- The Light.xaml token set, re-mixed for a dark window. Every key here exists there and
+         every key there exists here: a missing one is a control that stops repainting on swap. -->
+
+    <!-- Surfaces and chrome -->
+    <SolidColorBrush x:Key="Brush.Window" Color="#0F1216" />
+    <SolidColorBrush x:Key="Brush.Surface" Color="#151A21" />
+    <SolidColorBrush x:Key="Brush.SurfaceAlt" Color="#1B2129" />
+    <SolidColorBrush x:Key="Brush.Card" Color="#171D25" />
+    <SolidColorBrush x:Key="Brush.Hover" Color="#212A35" />
+    <SolidColorBrush x:Key="Brush.Selected" Color="#25334A" />
+    <SolidColorBrush x:Key="Brush.Border" Color="#2A333F" />
+    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="#1F2731" />
+
+    <SolidColorBrush x:Key="Brush.Text" Color="#E8EDF4" />
+    <SolidColorBrush x:Key="Brush.TextSecondary" Color="#9BA7B6" />
+    <SolidColorBrush x:Key="Brush.TextTertiary" Color="#6E7A89" />
+
+    <SolidColorBrush x:Key="Brush.Accent" Color="#4F8EF7" />
+    <SolidColorBrush x:Key="Brush.AccentHover" Color="#6BA0F9" />
+    <SolidColorBrush x:Key="Brush.AccentPressed" Color="#3F7AD8" />
+    <SolidColorBrush x:Key="Brush.AccentSoft" Color="#1D2C44" />
+    <SolidColorBrush x:Key="Brush.OnAccent" Color="#FFFFFF" />
+
+    <SolidColorBrush x:Key="Brush.Track" Color="#232B35" />
+    <SolidColorBrush x:Key="Brush.Scroll" Color="#3A4552" />
+
+    <!-- Lifted hues and dark tints rather than the light theme's pale washes: #2E7D46 on #0F1216 is
+         unreadable, and a pale green behind #E8EDF4 text hides the text on top of it. -->
+    <SolidColorBrush x:Key="Brush.Ok" Color="#4FC189" />
+    <SolidColorBrush x:Key="Brush.OkSoft" Color="#15301F" />
+    <SolidColorBrush x:Key="Brush.Warn" Color="#E0A448" />
+    <SolidColorBrush x:Key="Brush.WarnSoft" Color="#33291A" />
+    <SolidColorBrush x:Key="Brush.Danger" Color="#EE6A70" />
+    <SolidColorBrush x:Key="Brush.DangerSoft" Color="#3A2226" />
+    <SolidColorBrush x:Key="Brush.Info" Color="#5BA5E8" />
+    <SolidColorBrush x:Key="Brush.InfoSoft" Color="#16293C" />
+
+    <SolidColorBrush x:Key="Brush.Brand" Color="#FF4C55" />
+
+    <Color x:Key="Color.Syntax.Key">#6FB6FF</Color>
+    <Color x:Key="Color.Syntax.String">#7CD6A0</Color>
+    <Color x:Key="Color.Syntax.Number">#F0A868</Color>
+    <Color x:Key="Color.Syntax.Literal">#C0A0F5</Color>
+    <Color x:Key="Color.Syntax.Keyword">#6FB6FF</Color>
+    <Color x:Key="Color.Syntax.Function">#C0A0F5</Color>
+    <Color x:Key="Color.Syntax.Punctuation">#7A8798</Color>
+    <Color x:Key="Color.Syntax.Comment">#6E7A89</Color>
+
+</ResourceDictionary>

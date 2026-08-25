@@ -1,331 +1,852 @@
 <Window x:Class="CouchbaseInsight.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Couchbase Insight" Height="760" Width="1100"
-        WindowStartupLocation="CenterScreen">
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:ae="http://icsharpcode.net/sharpdevelop/avalonedit"
+        xmlns:v="clr-namespace:CouchbaseInsight.Views"
+        Title="Couchbase Insight"
+        Height="820" Width="1280" MinHeight="600" MinWidth="1000"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource Brush.Window}"
+        Foreground="{DynamicResource Brush.Text}"
+        FontFamily="{StaticResource Font.Ui}"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+
+    <!--
+        The window draws its own caption. The title strip is the busiest row in the app — brand,
+        which cluster is connected, the connection form toggle, the theme switch — and a native
+        title bar above it would be a second, emptier strip saying only the app's name.
+        CaptionHeight makes that strip draggable and double-click-to-maximise for free; the controls
+        sitting on it opt out with WindowChrome.IsHitTestVisibleInChrome.
+    -->
+    <WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="38"
+                            ResizeBorderThickness="6"
+                            CornerRadius="0"
+                            GlassFrameThickness="0"
+                            UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Window.InputBindings>
+        <KeyBinding Key="F5" Command="{Binding RunQueryCommand}" />
+        <KeyBinding Key="Return" Modifiers="Control" Command="{Binding RunQueryCommand}" />
+    </Window.InputBindings>
+
     <Window.Resources>
-        <BooleanToVisibilityConverter x:Key="BoolToVis" />
-        <Style x:Key="IssuesCellStyle" TargetType="TextBlock">
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="#8B6914" />
+
+        <!-- The two editors. AvalonEdit is a control, so everything above the text is stylable
+             here; the brushes below the control — selection, caret, current line — are not, and
+             live in Views/Editors.cs instead. -->
+        <Style x:Key="Editor" TargetType="{x:Type ae:TextEditor}">
+            <Setter Property="FontFamily" Value="{StaticResource Font.Mono}" />
+            <Setter Property="FontSize" Value="{StaticResource Size.Mono}" />
+            <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="HorizontalScrollBarVisibility" Value="Auto" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
         </Style>
+
+        <!-- The chevron between two steps of the keyspace picker. -->
+        <Style x:Key="Chevron" TargetType="{x:Type TextBlock}">
+            <Setter Property="Text" Value="&#xE76C;" />
+            <Setter Property="FontFamily" Value="{StaticResource Font.Icons}" />
+            <Setter Property="FontSize" Value="9" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextTertiary}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="8,0" />
+        </Style>
+
     </Window.Resources>
 
-    <DockPanel Margin="10">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="38" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
 
-        <!-- Status bar -->
-        <StatusBar DockPanel.Dock="Bottom" Margin="0,8,0,0">
-            <StatusBarItem>
-                <TextBlock Text="{Binding Status}" />
-            </StatusBarItem>
-            <StatusBarItem>
-                <ProgressBar Width="120" Height="12" IsIndeterminate="True"
-                             Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" />
-            </StatusBarItem>
-        </StatusBar>
-
-        <!-- Connection panel -->
-        <GroupBox DockPanel.Dock="Top" Header="Connection" Padding="8">
-          <StackPanel>
-
-            <!-- Saved connections bar -->
-            <Grid Margin="0,0,0,8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="180" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-
-                <TextBlock Text="Saved" VerticalAlignment="Center" Margin="0,0,6,0" />
-                <ComboBox Grid.Column="1" ItemsSource="{Binding SavedConnections}"
-                          SelectedItem="{Binding SelectedConnection}" VerticalAlignment="Center"
-                          ToolTip="Pick a saved connection to load its details, then Connect." />
-
-                <TextBlock Grid.Column="2" Text="Name" VerticalAlignment="Center" Margin="12,0,6,0" />
-                <TextBox Grid.Column="3" Text="{Binding ConnectionName, UpdateSourceTrigger=PropertyChanged}"
-                         VerticalAlignment="Center"
-                         ToolTip="Name under which Save stores the current details." />
-
-                <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="12,0,0,0">
-                    <Button Content="Save" Width="70" Command="{Binding SaveConnectionCommand}" />
-                    <Button Content="Delete" Width="70" Margin="6,0,0,0"
-                            Command="{Binding DeleteConnectionCommand}" />
-                </StackPanel>
-            </Grid>
-
+        <!-- ========================= Title bar ========================= -->
+        <Border Grid.Row="0" Background="{DynamicResource Brush.Surface}"
+                BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="180" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="180" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Text="Connection string" VerticalAlignment="Center" Margin="0,0,6,0" />
-                <TextBox Grid.Column="1" Text="{Binding ConnectionString, UpdateSourceTrigger=PropertyChanged}"
-                         VerticalAlignment="Center" />
+                <!-- Wordmark. The only red in the app: everything else that could be red means
+                     something failed. -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center"
+                            Margin="12,0,0,0">
+                    <Border Width="20" Height="20" CornerRadius="5"
+                            Background="{DynamicResource Brush.Brand}">
+                        <TextBlock Text="&#xE968;" FontFamily="{StaticResource Font.Icons}"
+                                   FontSize="11" Foreground="#FFFFFF"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="Couchbase Insight" Style="{StaticResource Text.Title}"
+                               VerticalAlignment="Center" Margin="9,0,0,0" />
+                </StackPanel>
 
-                <TextBlock Grid.Column="2" Text="User" VerticalAlignment="Center" Margin="12,0,6,0" />
-                <TextBox Grid.Column="3" Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}"
-                         VerticalAlignment="Center" />
-
-                <TextBlock Grid.Column="4" Text="Password" VerticalAlignment="Center" Margin="12,0,6,0" />
-                <PasswordBox Grid.Column="5" x:Name="PasswordBox"
-                             PasswordChanged="PasswordBox_OnPasswordChanged"
-                             VerticalAlignment="Center" />
-
-                <StackPanel Grid.Column="6" Margin="12,0,0,0">
-                    <CheckBox Content="External network (staging/tunnel)"
-                              IsChecked="{Binding UseNetworkResolutionExternal}"
-                              Margin="0,0,0,4" />
+                <!-- Connection state. Green dot and host once connected, grey and a prompt before. -->
+                <Border Grid.Column="1" Style="{StaticResource Pill}" Margin="14,0,0,0" Padding="9,3">
                     <StackPanel Orientation="Horizontal">
-                        <Button Content="Connect" Width="80" Command="{Binding ConnectCommand}" />
-                        <Button Content="Disconnect" Width="80" Margin="6,0,0,0"
-                                Command="{Binding DisconnectCommand}" />
+                        <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                 Fill="{DynamicResource Brush.TextTertiary}">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                            <Setter Property="Fill" Value="{DynamicResource Brush.Ok}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Style="{StaticResource Pill.Text}" Margin="7,0,0,0"
+                                   Text="{Binding ConnectionSummary}"
+                                   Visibility="{Binding IsConnected, Converter={StaticResource BoolVis}}" />
+                        <TextBlock Style="{StaticResource Pill.Text}" Margin="7,0,0,0"
+                                   Text="Not connected"
+                                   Visibility="{Binding IsConnected, Converter={StaticResource NotBoolVis}}" />
                     </StackPanel>
+                </Border>
+
+                <!-- Column 2 is empty on purpose: it is the drag handle for the window. -->
+
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                    <Button Style="{StaticResource Button.Small}" Margin="0,0,8,0"
+                            Command="{Binding ToggleConnectionPanelCommand}"
+                            ToolTip="Show or hide the connection form">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE839;" FontFamily="{StaticResource Font.Icons}"
+                                       FontSize="11" VerticalAlignment="Center" />
+                            <TextBlock Text="Connection" Margin="6,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="ThemeButton" Style="{StaticResource Button.Icon}" Margin="0,0,4,0"
+                            Click="ThemeButton_OnClick" Content="&#xE706;"
+                            ToolTip="Switch between the light and dark theme" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="4" Orientation="Horizontal"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                    <Button Style="{StaticResource Button.Caption}" Content="&#xE921;"
+                            Click="Minimise_OnClick" ToolTip="Minimise" />
+                    <Button x:Name="MaximiseButton" Style="{StaticResource Button.Caption}"
+                            Content="&#xE922;" Click="MaximiseRestore_OnClick" ToolTip="Maximise" />
+                    <Button Style="{StaticResource Button.Caption.Close}" Content="&#xE8BB;"
+                            Click="Close_OnClick" ToolTip="Close" />
                 </StackPanel>
             </Grid>
+        </Border>
 
-            <!-- Detail behind the status bar line: seed hosts, connection string warnings, the
-                 nodes the cluster actually advertised, and the unwrapped exception chain. -->
-            <Expander Header="Diagnostics" Margin="0,8,0,0" IsExpanded="True"
-                      Visibility="{Binding HasDiagnostics, Converter={StaticResource BoolToVis}}">
-                <TextBox Text="{Binding Diagnostics, Mode=OneWay}" IsReadOnly="True"
-                         FontFamily="Consolas" FontSize="11" MaxHeight="200" Margin="0,4,0,0"
-                         Padding="6" Background="#F7F7F7" BorderThickness="1"
-                         TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto"
-                         HorizontalScrollBarVisibility="Auto"
-                         ToolTip="Select and copy this when reporting a connection problem." />
-            </Expander>
-          </StackPanel>
-        </GroupBox>
+        <!-- ========================== Body ============================ -->
+        <DockPanel Grid.Row="1" Margin="12,10,12,0">
 
-        <!-- Selection panel -->
-        <GroupBox DockPanel.Dock="Top" Header="Selection" Padding="8" Margin="0,8,0,0">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="140" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+            <!-- Connection form: open on launch, folded away once connected -->
+            <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Margin="0,0,0,10"
+                    Visibility="{Binding IsConnectionPanelOpen, Converter={StaticResource BoolVis}}">
+                <StackPanel>
 
-                <TextBlock Text="Bucket" VerticalAlignment="Center" Margin="0,0,6,0" />
-                <ComboBox Grid.Column="1" ItemsSource="{Binding Buckets}"
-                          SelectedItem="{Binding SelectedBucket}" VerticalAlignment="Center" />
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="2" Text="Scope" VerticalAlignment="Center" Margin="12,0,6,0" />
-                <ComboBox Grid.Column="3" ItemsSource="{Binding Scopes}"
-                          DisplayMemberPath="Name"
-                          SelectedItem="{Binding SelectedScope}" VerticalAlignment="Center" />
+                        <TextBlock Text="SAVED" Style="{StaticResource Text.Label}" />
+                        <ComboBox Grid.Column="1" AutomationProperties.Name="Saved connection"
+                                  ItemsSource="{Binding SavedConnections}"
+                                  SelectedItem="{Binding SelectedConnection}"
+                                  VerticalAlignment="Center" Tag="No saved connections"
+                                  ToolTip="Pick a saved connection to load its details, then Connect." />
 
-                <TextBlock Grid.Column="4" Text="Collection" VerticalAlignment="Center" Margin="12,0,6,0" />
-                <ComboBox Grid.Column="5" ItemsSource="{Binding Collections}"
-                          SelectedItem="{Binding SelectedCollection}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="NAME" Style="{StaticResource Text.Label}"
+                                   Margin="14,0,7,0" />
+                        <TextBox Grid.Column="3" VerticalAlignment="Center" AutomationProperties.Name="Connection name"
+                                 Text="{Binding ConnectionName, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="e.g. staging"
+                                 ToolTip="Name under which Save stores the current details." />
 
-                <TextBlock Grid.Column="6" Text="Discriminator" VerticalAlignment="Center" Margin="12,0,6,0" />
-                <ComboBox Grid.Column="7" IsEditable="True"
-                          ItemsSource="{Binding DiscriminatorFields}"
-                          Text="{Binding Discriminator, UpdateSourceTrigger=PropertyChanged}"
-                          VerticalAlignment="Center"
-                          ToolTip="Field whose distinct values are the 'classes' (e.g. type, _class, docType). Pick from the collection's properties or type one." />
+                        <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="10,0,0,0">
+                            <Button Content="Save" MinWidth="76" Command="{Binding SaveConnectionCommand}" />
+                            <Button Content="Delete" MinWidth="76" Margin="6,0,0,0"
+                                    Style="{StaticResource Button.Danger}"
+                                    Command="{Binding DeleteConnectionCommand}" />
+                        </StackPanel>
+                    </Grid>
 
-                <Button Grid.Column="8" Content="Load Classes" Width="100" Margin="12,0,0,0"
-                        Command="{Binding LoadClassesCommand}" />
-            </Grid>
-        </GroupBox>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
 
-        <!-- Main content tabs -->
-        <TabControl Margin="0,8,0,0">
+                        <TextBlock Text="CLUSTER" Style="{StaticResource Text.Label}" />
+                        <TextBox Grid.Column="1" Style="{StaticResource TextBox.Mono}"
+                                 VerticalAlignment="Center" AutomationProperties.Name="Connection string"
+                                 Text="{Binding ConnectionString, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="couchbases://host1,host2" />
 
-            <!-- Schema Explorer tab -->
-            <TabItem Header="Schema Explorer">
+                        <TextBlock Grid.Column="2" Text="USER" Style="{StaticResource Text.Label}"
+                                   Margin="14,0,7,0" />
+                        <TextBox Grid.Column="3" VerticalAlignment="Center" AutomationProperties.Name="User"
+                                 Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Grid.Column="4" Text="PASSWORD" Style="{StaticResource Text.Label}"
+                                   Margin="14,0,7,0" />
+                        <PasswordBox Grid.Column="5" x:Name="PasswordBox" AutomationProperties.Name="Password"
+                                     PasswordChanged="PasswordBox_OnPasswordChanged"
+                                     VerticalAlignment="Center" />
+
+                        <StackPanel Grid.Column="6" Orientation="Horizontal" Margin="14,0,0,0">
+                            <CheckBox Style="{StaticResource Switch}"
+                                      Content="External network"
+                                      IsChecked="{Binding UseNetworkResolutionExternal}"
+                                      VerticalAlignment="Center" Margin="0,0,10,0"
+                                      ToolTip="Tick when connecting through a public IP or an SSH tunnel, so the SDK uses the cluster's external alternate addresses." />
+                            <Button Content="Connect" MinWidth="86" Style="{StaticResource Button.Primary}"
+                                    Command="{Binding ConnectCommand}" />
+                            <Button Content="Disconnect" MinWidth="86" Margin="6,0,0,0"
+                                    Command="{Binding DisconnectCommand}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Seed hosts, connection-string warnings, the nodes the cluster actually
+                         advertised, and the unwrapped exception chain. -->
+                    <Expander Margin="0,10,0,0" IsExpanded="False"
+                              Visibility="{Binding HasDiagnostics, Converter={StaticResource BoolVis}}">
+                        <Expander.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Diagnostics" Style="{StaticResource Text.Heading}" />
+                                <TextBlock Style="{StaticResource Text.Caption}" Margin="8,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Text="seed hosts, resolved nodes, exception chain" />
+                            </StackPanel>
+                        </Expander.Header>
+                        <Grid Margin="0,6,0,0">
+                            <Border Style="{StaticResource Card.Flush}"
+                                    Background="{DynamicResource Brush.SurfaceAlt}">
+                                <TextBox Text="{Binding Diagnostics, Mode=OneWay}" IsReadOnly="True"
+                                         Style="{StaticResource TextBox.Mono}"
+                                         Background="Transparent" BorderThickness="0"
+                                         MaxHeight="190" Padding="10,8"
+                                         TextWrapping="NoWrap"
+                                         VerticalContentAlignment="Top"
+                                         VerticalScrollBarVisibility="Auto"
+                                         HorizontalScrollBarVisibility="Auto" />
+                            </Border>
+                            <Button Style="{StaticResource Button.Small.Icon}" Content="&#xE8C8;"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                                    Margin="0,6,14,0"
+                                    Command="{Binding CopyDiagnosticsCommand}"
+                                    ToolTip="Copy the report — this is what to paste when reporting a connection problem" />
+                        </Grid>
+                    </Expander>
+                </StackPanel>
+            </Border>
+
+            <!-- Keyspace picker: the path down to the documents being read -->
+            <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="10,8"
+                    Margin="0,0,0,10">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="260" />
+                        <ColumnDefinition Width="*" MinWidth="120" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" MinWidth="120" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" MinWidth="120" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" MinWidth="120" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <!-- Classes -->
-                    <GroupBox Header="Classes" Padding="6">
-                        <DockPanel>
-                            <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
-                                <CheckBox Content="Analyze all documents (otherwise top 1000)"
-                                          IsChecked="{Binding AnalyzeAll}" Margin="0,0,0,6" />
-                                <Button Content="Analyze Structure" Command="{Binding AnalyzeCommand}" />
-                            </StackPanel>
-                            <ListBox ItemsSource="{Binding Classes}"
-                                     SelectedItem="{Binding SelectedClass}" />
-                        </DockPanel>
-                    </GroupBox>
+                    <ComboBox Grid.Column="0" ItemsSource="{Binding Buckets}" Tag="Bucket"
+                              AutomationProperties.Name="Bucket"
+                              SelectedItem="{Binding SelectedBucket}" VerticalAlignment="Center"
+                              ToolTip="Bucket" />
 
-                    <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Center"
-                                  VerticalAlignment="Stretch" Background="Transparent" />
+                    <TextBlock Grid.Column="1" Style="{StaticResource Chevron}" />
 
-                    <!-- Right: schema grid + distinct values panel -->
-                    <Grid Grid.Column="2">
+                    <ComboBox Grid.Column="2" ItemsSource="{Binding Scopes}" Tag="Scope"
+                              AutomationProperties.Name="Scope"
+                              DisplayMemberPath="Name"
+                              SelectedItem="{Binding SelectedScope}" VerticalAlignment="Center"
+                              ToolTip="Scope" />
+
+                    <TextBlock Grid.Column="3" Style="{StaticResource Chevron}" />
+
+                    <ComboBox Grid.Column="4" ItemsSource="{Binding Collections}" Tag="Collection"
+                              AutomationProperties.Name="Collection"
+                              SelectedItem="{Binding SelectedCollection}" VerticalAlignment="Center"
+                              ToolTip="Collection" />
+
+                    <TextBlock Grid.Column="5" Style="{StaticResource Chevron}" />
+
+                    <ComboBox Grid.Column="6" IsEditable="True" AutomationProperties.Name="Discriminator"
+                              Style="{StaticResource ComboBox.Mono}"
+                              ItemsSource="{Binding DiscriminatorFields}"
+                              Text="{Binding Discriminator, UpdateSourceTrigger=PropertyChanged}"
+                              VerticalAlignment="Center"
+                              ToolTip="Discriminator — the field whose distinct values are the classes (type, _class, docType…). Pick one of the collection's properties or type your own." />
+
+                    <Button Grid.Column="7" Content="Load classes" Margin="10,0,0,0"
+                            Style="{StaticResource Button.Primary}"
+                            Command="{Binding LoadClassesCommand}" />
+                </Grid>
+            </Border>
+
+            <!-- Tabs -->
+            <TabControl>
+
+                <!-- ===================== Schema explorer ==================== -->
+                <TabItem Header="Schema explorer">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="270" MinWidth="200" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" MinWidth="420" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Classes -->
+                        <Border Grid.Column="0" Style="{StaticResource Card.Flush}">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Right" Style="{StaticResource Pill}"
+                                                Margin="6,0,0,0"
+                                                Visibility="{Binding Classes.Count, Converter={StaticResource PositiveVis}}">
+                                            <TextBlock Style="{StaticResource Pill.Text}"
+                                                       Text="{Binding Classes.Count}" />
+                                        </Border>
+                                        <TextBlock Text="Classes" Style="{StaticResource Text.Heading}"
+                                                   VerticalAlignment="Center" />
+                                    </DockPanel>
+                                </Border>
+
+                                <Border DockPanel.Dock="Top" Padding="8,8,8,4">
+                                    <TextBox Style="{StaticResource TextBox.Search}" Tag="Filter classes"
+                                             AutomationProperties.Name="Filter classes"
+                                             Text="{Binding ClassFilter, UpdateSourceTrigger=PropertyChanged}"
+                                             Visibility="{Binding Classes.Count, Converter={StaticResource PositiveVis}}" />
+                                </Border>
+
+                                <Border DockPanel.Dock="Bottom" Style="{StaticResource CardFooter}">
+                                    <StackPanel>
+                                        <CheckBox Style="{StaticResource Switch}"
+                                                  Content="Read every document"
+                                                  IsChecked="{Binding AnalyzeAll}"
+                                                  Margin="0,0,0,7" HorizontalAlignment="Left"
+                                                  ToolTip="Off: the schema is inferred from the first 1000 documents of the class. On: every document is read, which is exact and slow." />
+                                        <Button Content="Analyze structure"
+                                                Style="{StaticResource Button.Primary}"
+                                                Command="{Binding AnalyzeCommand}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Grid>
+                                    <ListBox Style="{StaticResource EntryList}" AutomationProperties.Name="Classes"
+                                             ItemsSource="{Binding ClassesView}"
+                                             SelectedItem="{Binding SelectedClass}">
+                                        <ListBox.InputBindings>
+                                            <MouseBinding MouseAction="LeftDoubleClick"
+                                                          Command="{Binding AnalyzeCommand}" />
+                                        </ListBox.InputBindings>
+                                    </ListBox>
+
+                                    <StackPanel VerticalAlignment="Center"
+                                                Visibility="{Binding Classes.Count, Converter={StaticResource ZeroVis}}">
+                                        <TextBlock Style="{StaticResource Glyph.Placeholder}" Text="&#xE8EC;" />
+                                        <TextBlock Style="{StaticResource Text.Placeholder}"
+                                                   Text="Pick a bucket, scope and collection above, then Load classes." />
+                                    </StackPanel>
+                                </Grid>
+                            </DockPanel>
+                        </Border>
+
+                        <GridSplitter Grid.Column="1" Width="10" HorizontalAlignment="Stretch"
+                                      VerticalAlignment="Stretch" />
+
+                        <!-- Schema and values -->
+                        <Grid Grid.Column="2">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="2*" MinHeight="140" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="*" MinHeight="90" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Style="{StaticResource Card.Flush}">
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
+                                        <DockPanel>
+                                            <TextBox DockPanel.Dock="Right" Width="170"
+                                                     Style="{StaticResource TextBox.Search}"
+                                                     Tag="Filter fields" Margin="8,0,0,0" AutomationProperties.Name="Filter fields"
+                                                     Text="{Binding FieldFilter, UpdateSourceTrigger=PropertyChanged}"
+                                                     Visibility="{Binding HasSchema, Converter={StaticResource BoolVis}}" />
+
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBlock Text="Schema" Style="{StaticResource Text.Heading}"
+                                                           VerticalAlignment="Center" />
+                                                <TextBlock Style="{StaticResource Text.Mono}" Margin="8,0,12,0"
+                                                           VerticalAlignment="Center" MaxWidth="220"
+                                                           Foreground="{DynamicResource Brush.Accent}"
+                                                           Text="{Binding AnalyzedClass}"
+                                                           ToolTip="{Binding AnalyzedClass}" />
+
+                                                <!-- The headline numbers, one pill each. -->
+                                                <StackPanel Orientation="Horizontal"
+                                                            Visibility="{Binding HasSchema, Converter={StaticResource BoolVis}}">
+                                                    <Border Style="{StaticResource Pill}">
+                                                        <TextBlock Style="{StaticResource Pill.Text}">
+                                                            <Run Text="{Binding FieldCount, Mode=OneWay}" /><Run Text=" fields" />
+                                                        </TextBlock>
+                                                    </Border>
+                                                    <Border Style="{StaticResource Pill}"
+                                                            Background="{DynamicResource Brush.OkSoft}">
+                                                        <TextBlock Style="{StaticResource Pill.Text}"
+                                                                   Foreground="{DynamicResource Brush.Ok}">
+                                                            <Run Text="{Binding RequiredCount, Mode=OneWay}" /><Run Text=" required" />
+                                                        </TextBlock>
+                                                    </Border>
+                                                    <Border Style="{StaticResource Pill}"
+                                                            Background="{DynamicResource Brush.WarnSoft}"
+                                                            Visibility="{Binding IssueCount, Converter={StaticResource PositiveVis}}"
+                                                            ToolTip="Fields whose name collides with another only by case, or that were seen with more than one JSON type">
+                                                        <TextBlock Style="{StaticResource Pill.Text}"
+                                                                   Foreground="{DynamicResource Brush.Warn}">
+                                                            <Run Text="{Binding IssueCount, Mode=OneWay}" /><Run Text=" flagged" />
+                                                        </TextBlock>
+                                                    </Border>
+                                                    <Border Style="{StaticResource Pill}"
+                                                            ToolTip="Documents read to infer this schema">
+                                                        <TextBlock Style="{StaticResource Pill.Text}">
+                                                            <Run Text="{Binding SampleSize, Mode=OneWay}" /><Run Text=" docs sampled" />
+                                                        </TextBlock>
+                                                    </Border>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+
+                                    <Grid>
+                                        <DataGrid AutomationProperties.Name="Fields" ItemsSource="{Binding FieldsView}"
+                                                  SelectedItem="{Binding SelectedField}">
+                                            <DataGrid.Columns>
+
+                                                <DataGridTemplateColumn Header="Field" Width="2.2*">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <!-- Parent path dimmed, leaf at full contrast: ten nested
+                                                                 fields under one object are then ten distinct names
+                                                                 rather than ten copies of their prefix. -->
+                                                            <TextBlock Style="{StaticResource Text.Mono}"
+                                                                       ToolTip="{Binding Name}">
+                                                                <Run Foreground="{DynamicResource Brush.TextTertiary}"
+                                                                     Text="{Binding Name, Mode=OneWay, Converter={StaticResource PathPrefix}}" /><Run
+                                                                     Text="{Binding Name, Mode=OneWay, Converter={StaticResource PathLeaf}}" />
+                                                            </TextBlock>
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+
+                                                <DataGridTemplateColumn Header="Type" Width="1.5*">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <ItemsControl ItemsSource="{Binding Types, Converter={StaticResource Csv}}"
+                                                                          VerticalAlignment="Center">
+                                                                <ItemsControl.ItemsPanel>
+                                                                    <ItemsPanelTemplate>
+                                                                        <StackPanel Orientation="Horizontal" />
+                                                                    </ItemsPanelTemplate>
+                                                                </ItemsControl.ItemsPanel>
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <Border Style="{StaticResource TypeBadge}">
+                                                                            <TextBlock Style="{StaticResource TypeBadge.Text}"
+                                                                                       Text="{Binding}" />
+                                                                        </Border>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+
+                                                <DataGridTemplateColumn Header="Presence" Width="150">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                                                        ToolTip="{Binding Occurrences, StringFormat='Seen in {0} of the sampled documents'}">
+                                                                <Grid>
+                                                                    <Border Style="{StaticResource PresenceTrack}" />
+                                                                    <Border Style="{StaticResource PresenceFill}"
+                                                                            Width="{Binding PresencePercent, Mode=OneWay,
+                                                                                            Converter={StaticResource PercentWidth},
+                                                                                            ConverterParameter=54}" />
+                                                                </Grid>
+                                                                <TextBlock Style="{StaticResource Text.Mono}" Margin="9,0,0,0"
+                                                                           Foreground="{DynamicResource Brush.TextSecondary}"
+                                                                           Text="{Binding PresencePercent, StringFormat={}{0:F1}%}" />
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+
+                                                <DataGridTemplateColumn Header="Seen" Width="70">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Style="{StaticResource Text.Mono}"
+                                                                       Foreground="{DynamicResource Brush.TextSecondary}"
+                                                                       Text="{Binding Occurrences}" />
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+
+                                                <DataGridTemplateColumn Header="Requirement" Width="100">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <Border>
+                                                                <Border.Style>
+                                                                    <Style TargetType="Border" BasedOn="{StaticResource Pill}">
+                                                                        <Setter Property="Margin" Value="0" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsRequired}" Value="True">
+                                                                                <Setter Property="Background"
+                                                                                        Value="{DynamicResource Brush.OkSoft}" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </Border.Style>
+                                                                <TextBlock Text="{Binding RequirementLabel}">
+                                                                    <TextBlock.Style>
+                                                                        <Style TargetType="TextBlock" BasedOn="{StaticResource Pill.Text}">
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsRequired}" Value="True">
+                                                                                    <Setter Property="Foreground"
+                                                                                            Value="{DynamicResource Brush.Ok}" />
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </TextBlock.Style>
+                                                                </TextBlock>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+
+                                                <DataGridTemplateColumn Header="Flags" Width="*">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                                <Border Style="{StaticResource Pill}"
+                                                                        Background="{DynamicResource Brush.WarnSoft}"
+                                                                        Visibility="{Binding HasCaseDuplicate, Converter={StaticResource BoolVis}}"
+                                                                        ToolTip="Another field has the same name under a different casing — the two are separate fields to the server">
+                                                                    <TextBlock Style="{StaticResource Pill.Text}"
+                                                                               Foreground="{DynamicResource Brush.Warn}"
+                                                                               Text="case conflict" />
+                                                                </Border>
+                                                                <Border Style="{StaticResource Pill}"
+                                                                        Background="{DynamicResource Brush.WarnSoft}"
+                                                                        Visibility="{Binding HasMultipleTypes, Converter={StaticResource BoolVis}}"
+                                                                        ToolTip="Seen with more than one JSON type across the sampled documents">
+                                                                    <TextBlock Style="{StaticResource Pill.Text}"
+                                                                               Foreground="{DynamicResource Brush.Warn}"
+                                                                               Text="multi-type" />
+                                                                </Border>
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+
+                                        <StackPanel VerticalAlignment="Center"
+                                                    Visibility="{Binding FieldCount, Converter={StaticResource ZeroVis}}">
+                                            <TextBlock Style="{StaticResource Glyph.Placeholder}" Text="&#xE9D5;" />
+                                            <TextBlock Style="{StaticResource Text.Placeholder}"
+                                                       Text="Select a class and run Analyze structure. Every field found in the sample is listed with the types it was seen as and how often it appeared." />
+                                        </StackPanel>
+                                    </Grid>
+                                </DockPanel>
+                            </Border>
+
+                            <GridSplitter Grid.Row="1" Height="10" HorizontalAlignment="Stretch"
+                                          VerticalAlignment="Stretch" />
+
+                            <Border Grid.Row="2" Style="{StaticResource Card.Flush}">
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small.Icon}"
+                                                    Content="&#xE8C8;" Margin="6,0,0,0"
+                                                    Command="{Binding CopyDistinctValuesCommand}"
+                                                    Visibility="{Binding DistinctValues.Count, Converter={StaticResource PositiveVis}}"
+                                                    ToolTip="Copy every value listed" />
+                                            <TextBlock Text="{Binding DistinctValuesHeader}"
+                                                       Style="{StaticResource Text.Heading}"
+                                                       VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </DockPanel>
+                                    </Border>
+
+                                    <Grid>
+                                        <ListBox Style="{StaticResource ValueList}" AutomationProperties.Name="Distinct values"
+                                                 ItemsSource="{Binding DistinctValues}" />
+
+                                        <TextBlock Style="{StaticResource Text.Placeholder}"
+                                                   Visibility="{Binding DistinctValues.Count, Converter={StaticResource ZeroVis}}"
+                                                   Text="Click a field above to see the values it actually holds." />
+                                    </Grid>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </TabItem>
+
+                <!-- ========================= Query ========================= -->
+                <TabItem Header="Query">
+                    <Grid>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="2*" MinHeight="80" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" MinHeight="60" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" MinHeight="120" />
                         </Grid.RowDefinitions>
 
-                        <!-- Schema DataGrid -->
-                        <GroupBox Padding="6">
-                            <GroupBox.Header>
-                                <TextBlock Text="{Binding SchemaSummary, TargetNullValue='Schema', FallbackValue='Schema'}" />
-                            </GroupBox.Header>
-                            <DataGrid ItemsSource="{Binding Fields}"
-                                      SelectedItem="{Binding SelectedField}"
-                                      AutoGenerateColumns="False"
-                                      IsReadOnly="True" CanUserAddRows="False"
-                                      SelectionMode="Single"
-                                      GridLinesVisibility="Horizontal" HeadersVisibility="Column">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Field" Binding="{Binding Name}" Width="2*" />
-                                    <DataGridTextColumn Header="Issues" Binding="{Binding Issues}" Width="Auto"
-                                                        ElementStyle="{StaticResource IssuesCellStyle}" />
-                                    <DataGridTextColumn Header="Type(s)" Binding="{Binding Types}" Width="*" />
-                                    <DataGridTextColumn Header="Requirement" Binding="{Binding RequirementLabel}" Width="Auto" />
-                                    <DataGridTextColumn Header="Presence"
-                                                        Binding="{Binding PresencePercent, StringFormat={}{0:F1}%}" Width="Auto" />
-                                    <DataGridTextColumn Header="Seen" Binding="{Binding Occurrences}" Width="Auto" />
-                                </DataGrid.Columns>
-                                <DataGrid.RowStyle>
-                                    <Style TargetType="DataGridRow">
-                                        <Setter Property="Background" Value="White" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsRequired}" Value="True">
-                                                <Setter Property="Background" Value="#E8F5E9" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </DataGrid.RowStyle>
-                            </DataGrid>
-                        </GroupBox>
+                        <!-- Statement builder -->
+                        <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,8">
+                            <StackPanel>
 
-                        <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
-                                      VerticalAlignment="Center" Background="Transparent" />
+                                <!-- Builder mode: SELECT / FROM, then a condition at a time. -->
+                                <StackPanel Visibility="{Binding IsRawQuery, Converter={StaticResource NotBoolVis}}">
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="2*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
 
-                        <!-- Distinct values panel -->
-                        <GroupBox Grid.Row="2" Padding="6">
-                            <GroupBox.Header>
-                                <TextBlock Text="{Binding DistinctValuesHeader}" />
-                            </GroupBox.Header>
-                            <ListBox ItemsSource="{Binding DistinctValues}"
-                                     FontFamily="Consolas" FontSize="12" />
-                        </GroupBox>
-                    </Grid>
-                </Grid>
-            </TabItem>
+                                        <TextBlock Text="SELECT" Style="{StaticResource Text.Label}" />
+                                        <TextBox Grid.Column="1" Style="{StaticResource TextBox.Mono}" AutomationProperties.Name="Select expression"
+                                                 Margin="0,0,14,0" VerticalAlignment="Center"
+                                                 Text="{Binding SelectExpression, UpdateSourceTrigger=PropertyChanged}" />
 
-            <!-- Query tab -->
-            <TabItem Header="Query">
-                <Grid Margin="4">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" MinHeight="100" />
-                    </Grid.RowDefinitions>
+                                        <TextBlock Grid.Column="2" Text="FROM" Style="{StaticResource Text.Label}" />
+                                        <TextBox Grid.Column="3" Style="{StaticResource TextBox.Mono}" AutomationProperties.Name="From keyspace"
+                                                 VerticalAlignment="Center"
+                                                 Text="{Binding FromKeyspace, UpdateSourceTrigger=PropertyChanged}"
+                                                 Tag="`bucket`.`scope`.`collection`"
+                                                 ToolTip="Backticks around each identifier: `bucket`.`scope`.`collection`" />
 
-                    <!-- SELECT … FROM … -->
-                    <GroupBox Header="Select" Padding="6">
-                        <Grid>
+                                        <Button Grid.Column="4" Content="Sync from selection" Margin="10,0,0,0"
+                                                Command="{Binding SyncFromSelectionCommand}"
+                                                ToolTip="Fill FROM and WHERE from the keyspace picker above, and load that collection's fields into the condition builder" />
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Text="WHERE" Style="{StaticResource Text.Label}" />
+                                        <ComboBox Grid.Column="1" AutomationProperties.Name="Condition field" ItemsSource="{Binding QueryFields}"
+                                                  DisplayMemberPath="Name" Tag="Field"
+                                                  Style="{StaticResource ComboBox.Mono}"
+                                                  SelectedItem="{Binding PendingWhereField}"
+                                                  ToolTip="Fields discovered by Sync from selection" />
+                                        <ComboBox Grid.Column="2" Margin="6,0" AutomationProperties.Name="Condition operator"
+                                                  ItemsSource="{Binding WhereOperators}"
+                                                  SelectedItem="{Binding PendingWhereOperator}" />
+                                        <TextBox Grid.Column="3" Style="{StaticResource TextBox.Mono}" AutomationProperties.Name="Condition value"
+                                                 Margin="0,0,6,0" VerticalAlignment="Center"
+                                                 Text="{Binding PendingWhereValue, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsEnabled="{Binding WhereValueEnabled}"
+                                                 Tag="value" />
+                                        <Button Grid.Column="4" Content="Add" MinWidth="58"
+                                                Command="{Binding AddWhereConditionCommand}"
+                                                ToolTip="Append this condition to the clause below, quoted the way its value needs" />
+                                        <Button Grid.Column="5" Content="Clear" MinWidth="58" Margin="6,0,0,0"
+                                                Command="{Binding ClearWhereCommand}" />
+                                    </Grid>
+
+                                    <Border Style="{StaticResource Card.Flush}" MinHeight="62" MaxHeight="130"
+                                            Background="{DynamicResource Brush.Surface}">
+                                        <ae:TextEditor Style="{StaticResource Editor}"
+                                                       AutomationProperties.Name="Where clause"
+                                                       v:Editors.Syntax="N1ql"
+                                                       v:Editors.Text="{Binding WhereClause, Mode=TwoWay,
+                                                                                UpdateSourceTrigger=PropertyChanged}"
+                                                       ToolTip="Built by the row above, or typed here directly" />
+                                    </Border>
+                                </StackPanel>
+
+                                <!-- Raw mode: the whole statement, by hand. -->
+                                <Border Style="{StaticResource Card.Flush}" MinHeight="130"
+                                        Background="{DynamicResource Brush.Surface}"
+                                        Visibility="{Binding IsRawQuery, Converter={StaticResource BoolVis}}">
+                                    <ae:TextEditor Style="{StaticResource Editor}"
+                                                   ShowLineNumbers="True"
+                                                   v:Editors.Syntax="N1ql"
+                                                   v:Editors.Text="{Binding RawStatement, Mode=TwoWay,
+                                                                            UpdateSourceTrigger=PropertyChanged}" />
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- What will run, and the buttons that run it -->
+                        <Grid Grid.Row="1" Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="2*" />
-                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="SELECT" VerticalAlignment="Center"
-                                       FontFamily="Consolas" FontWeight="Bold" />
-                            <TextBox Grid.Column="1" Margin="6,0"
-                                     Text="{Binding SelectExpression, UpdateSourceTrigger=PropertyChanged}"
-                                     FontFamily="Consolas" VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="2" Text="FROM" VerticalAlignment="Center"
-                                       FontFamily="Consolas" FontWeight="Bold" />
-                            <TextBox Grid.Column="3" Margin="6,0"
-                                     Text="{Binding FromKeyspace, UpdateSourceTrigger=PropertyChanged}"
-                                     FontFamily="Consolas" VerticalAlignment="Center"
-                                     ToolTip="Use backticks for identifiers: `bucket`.`scope`.`collection`" />
-                            <Button Grid.Column="4" Content="Sync from Selection" Padding="10,3"
-                                    Command="{Binding SyncFromSelectionCommand}"
-                                    ToolTip="Fill FROM and WHERE from the Selection pane above" />
+
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Run query" MinWidth="110"
+                                        Style="{StaticResource Button.Primary}"
+                                        Command="{Binding RunQueryCommand}"
+                                        ToolTip="Run the statement (F5)" />
+                                <Button Content="Cancel" MinWidth="80" Margin="6,0,0,0"
+                                        Style="{StaticResource Button.Danger}"
+                                        Command="{Binding CancelQueryCommand}"
+                                        Visibility="{Binding IsQueryRunning, Converter={StaticResource BoolVis}}" />
+                                <CheckBox Style="{StaticResource Switch}" Margin="10,0,0,0"
+                                          Content="Edit as SQL++"
+                                          IsChecked="{Binding IsRawQuery}"
+                                          VerticalAlignment="Center"
+                                          ToolTip="Hand the composed statement to a free-text editor, for everything the builder cannot express — JOIN, ORDER BY, LIMIT, subqueries." />
+                            </StackPanel>
+
+                            <!-- The exact text that will be sent. The builder shows its parts; this
+                                 shows the whole, which is what a server error will refer to. -->
+                            <Border Grid.Column="1" Margin="14,0,0,0" CornerRadius="7" Padding="10,5"
+                                    Background="{DynamicResource Brush.SurfaceAlt}"
+                                    Visibility="{Binding IsRawQuery, Converter={StaticResource NotBoolVis}}">
+                                <TextBlock Style="{StaticResource Text.MonoCaption}"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding QueryPreview}"
+                                           ToolTip="{Binding QueryPreview}" />
+                            </Border>
+
+                            <Button Grid.Column="2" Style="{StaticResource Button.Small.Icon}"
+                                    Content="&#xE8C8;" Margin="8,0,0,0"
+                                    Command="{Binding CopyStatementCommand}"
+                                    ToolTip="Copy the statement" />
                         </Grid>
-                    </GroupBox>
 
-                    <!-- WHERE builder -->
-                    <GroupBox Grid.Row="1" Header="Where" Padding="6" Margin="0,4,0,0">
-                        <DockPanel>
-                            <!-- Field picker row -->
-                            <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="110" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <ComboBox ItemsSource="{Binding QueryFields}" DisplayMemberPath="Name"
-                                          SelectedItem="{Binding PendingWhereField}"
-                                          ToolTip="Fields discovered by Sync from Selection" />
-                                <ComboBox Grid.Column="1" Margin="4,0"
-                                          ItemsSource="{Binding WhereOperators}"
-                                          SelectedItem="{Binding PendingWhereOperator}" />
-                                <TextBox Grid.Column="2" Margin="0,0,4,0"
-                                         Text="{Binding PendingWhereValue, UpdateSourceTrigger=PropertyChanged}"
-                                         IsEnabled="{Binding WhereValueEnabled}"
-                                         FontFamily="Consolas" VerticalAlignment="Center" />
-                                <Button Grid.Column="3" Content="Add" Width="50"
-                                        Command="{Binding AddWhereConditionCommand}" />
-                                <Button Grid.Column="4" Content="Clear" Width="50" Margin="4,0,0,0"
-                                        Command="{Binding ClearWhereCommand}" />
-                            </Grid>
-                            <!-- Editable WHERE text -->
-                            <TextBox Text="{Binding WhereClause, UpdateSourceTrigger=PropertyChanged}"
-                                     FontFamily="Consolas" FontSize="12"
-                                     AcceptsReturn="True"
-                                     VerticalScrollBarVisibility="Auto"
-                                     MinHeight="44" MaxHeight="110"
-                                     ToolTip="Auto-built from the field picker above, or type manually" />
-                        </DockPanel>
-                    </GroupBox>
+                        <!-- Result -->
+                        <Border Grid.Row="2" Style="{StaticResource Card.Flush}">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small.Icon}"
+                                                Content="&#xE8C8;" Margin="6,0,0,0"
+                                                Command="{Binding CopyQueryResultCommand}"
+                                                ToolTip="Copy the JSON" />
+                                        <Border DockPanel.Dock="Right" Style="{StaticResource Pill}"
+                                                Background="{DynamicResource Brush.InfoSoft}"
+                                                Visibility="{Binding QueryResult, Converter={StaticResource NotEmptyVis}}">
+                                            <TextBlock Style="{StaticResource Pill.Text}"
+                                                       Foreground="{DynamicResource Brush.Info}">
+                                                <Run Text="{Binding QueryRowCount, Mode=OneWay}" /><Run Text=" rows" />
+                                            </TextBlock>
+                                        </Border>
+                                        <TextBlock Text="Result" Style="{StaticResource Text.Heading}"
+                                                   VerticalAlignment="Center" />
+                                    </DockPanel>
+                                </Border>
 
-                    <!-- Run button + count -->
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,4">
-                        <Button Content="Run Query" Width="100" Command="{Binding RunQueryCommand}" />
-                        <TextBlock Text="{Binding QueryResultCountLabel}"
-                                   VerticalAlignment="Center" Margin="14,0,0,0"
-                                   FontWeight="SemiBold" Foreground="#1565C0" FontSize="13" />
-                    </StackPanel>
+                                <Grid>
+                                    <ae:TextEditor Style="{StaticResource Editor}"
+                                                   IsReadOnly="True"
+                                                   ShowLineNumbers="True"
+                                                   v:Editors.Syntax="Json"
+                                                   v:Editors.Text="{Binding QueryResult, Mode=OneWay}" />
 
-                    <!-- Result JSON -->
-                    <GroupBox Grid.Row="3" Header="Result (JSON)" Padding="4">
-                        <TextBox Text="{Binding QueryResult, Mode=OneWay}"
-                                 FontFamily="Consolas" FontSize="12"
-                                 IsReadOnly="True"
-                                 VerticalScrollBarVisibility="Auto"
-                                 HorizontalScrollBarVisibility="Auto"
-                                 TextWrapping="NoWrap"
-                                 Background="#FAFAFA" />
-                    </GroupBox>
-                </Grid>
-            </TabItem>
+                                    <StackPanel VerticalAlignment="Center"
+                                                Visibility="{Binding QueryResult, Converter={StaticResource EmptyVis}}">
+                                        <TextBlock Style="{StaticResource Glyph.Placeholder}" Text="&#xE773;" />
+                                        <TextBlock Style="{StaticResource Text.Placeholder}"
+                                                   Text="Run a query to see its rows here. Ctrl+F searches the result." />
+                                    </StackPanel>
+                                </Grid>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+                </TabItem>
 
-        </TabControl>
-    </DockPanel>
+            </TabControl>
+        </DockPanel>
+
+        <!-- ========================= Status bar ======================== -->
+        <Border Grid.Row="2" Background="{DynamicResource Brush.Surface}"
+                BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0"
+                Padding="14,0" Height="30">
+            <DockPanel>
+                <ProgressBar DockPanel.Dock="Right" Style="{StaticResource Busy}"
+                             Visibility="{Binding IsBusy, Converter={StaticResource BoolVis}}" />
+
+                <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,9,0">
+                    <Ellipse.Style>
+                        <Style TargetType="Ellipse">
+                            <Setter Property="Fill" Value="{DynamicResource Brush.TextTertiary}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding StatusLevel}" Value="Busy">
+                                    <Setter Property="Fill" Value="{DynamicResource Brush.Accent}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding StatusLevel}" Value="Ok">
+                                    <Setter Property="Fill" Value="{DynamicResource Brush.Ok}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding StatusLevel}" Value="Error">
+                                    <Setter Property="Fill" Value="{DynamicResource Brush.Danger}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Ellipse.Style>
+                </Ellipse>
+
+                <TextBlock VerticalAlignment="Center" Text="{Binding Status}"
+                           TextTrimming="CharacterEllipsis" ToolTip="{Binding Status}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Base}">
+                            <Setter Property="FontSize" Value="12" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding StatusLevel}" Value="Error">
+                                    <Setter Property="Foreground" Value="{DynamicResource Brush.Danger}" />
+                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </DockPanel>
+        </Border>
+    </Grid>
 
 </Window>

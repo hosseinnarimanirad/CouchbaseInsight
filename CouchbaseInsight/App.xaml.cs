@@ -2,6 +2,7 @@ using System.Windows;
 using Microsoft.Extensions.Configuration;
 using CouchbaseInsight.Models;
 using CouchbaseInsight.Services;
+using CouchbaseInsight.Themes;
 using CouchbaseInsight.ViewModels;
 
 namespace CouchbaseInsight;
@@ -13,6 +14,10 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Before any window exists, so the first frame is already in the right theme rather than
+        // flashing the dictionary that App.xaml happened to merge.
+        ThemeManager.Apply(ThemeManager.Preferred());
 
         var config = new ConfigurationBuilder()
             .SetBasePath(AppContext.BaseDirectory)

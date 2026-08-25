@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using CouchbaseInsight.Themes;
 using CouchbaseInsight.ViewModels;
 
 namespace CouchbaseInsight;
@@ -14,10 +15,14 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         Loaded += OnLoaded;
+        StateChanged += (_, _) => UpdateChrome();
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        UpdateChrome();
+        UpdateThemeButton();
+
         if (DataContext is not MainViewModel vm) return;
 
         // Sync the initial password (from the loaded profile) into the PasswordBox, which
@@ -47,5 +52,52 @@ public partial class MainWindow : Window
         _syncingPassword = true;
         try { PasswordBox.Password = password; }
         finally { _syncingPassword = false; }
+    }
+
+    // ---- Window chrome ----
+    //
+    // The window draws its own caption, so the three buttons on the right and the maximised-state
+    // inset are this class's job rather than the shell's.
+
+    private void Minimise_OnClick(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState.Minimized;
+
+    private void MaximiseRestore_OnClick(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+
+    private void Close_OnClick(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>
+    /// A WindowChrome window maximises to the monitor's full rectangle, which puts the outer few
+    /// pixels of the content — the resize border's worth — off the edge of the screen. The inset
+    /// gives them back, and the button glyph follows the state.
+    /// </summary>
+    private void UpdateChrome()
+    {
+        var maximised = WindowState == WindowState.Maximized;
+
+        BorderThickness = maximised
+            ? new Thickness(SystemParameters.WindowResizeBorderThickness.Left + 1)
+            : new Thickness(0);
+
+        MaximiseButton.Content = maximised ? "" : "";
+        MaximiseButton.ToolTip = maximised ? "Restore" : "Maximise";
+    }
+
+    private void ThemeButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ThemeManager.Toggle();
+        UpdateThemeButton();
+    }
+
+    // The glyph names the theme you would switch to, not the one you are in: a sun on a dark
+    // window, a moon on a light one.
+    private void UpdateThemeButton()
+    {
+        var dark = ThemeManager.Current == AppTheme.Dark;
+        ThemeButton.Content = dark ? "" : "";
+        ThemeButton.ToolTip = dark ? "Switch to the light theme" : "Switch to the dark theme";
     }
 }

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    JSON highlighting for the query result pane.
+
+    The foregrounds below are only defaults for a designer that loads this file on its own; at
+    runtime SyntaxThemes overwrites every named colour from the active theme dictionary, which is
+    how the result pane follows the light/dark switch.
+-->
+<SyntaxDefinition name="Json" xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+
+  <Color name="Key" foreground="#6FB6FF" />
+  <Color name="String" foreground="#7CD6A0" />
+  <Color name="Number" foreground="#F0A868" />
+  <Color name="Literal" foreground="#C0A0F5" />
+  <Color name="Punctuation" foreground="#7A8798" />
+
+  <RuleSet>
+
+    <!--
+        A key is a string with a colon after it. The lookahead is what separates the two, and this
+        span is declared before the general string span below so that it wins when both would begin
+        at the same quote: the engine keeps the first match at a given offset.
+    -->
+    <Span color="Key">
+      <Begin>"(?=(?:\\.|[^"\\])*"\s*:)</Begin>
+      <End>"</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <Span color="String">
+      <Begin>"</Begin>
+      <End>"</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <Keywords color="Literal">
+      <Word>true</Word>
+      <Word>false</Word>
+      <Word>null</Word>
+    </Keywords>
+
+    <Rule color="Number">-?\d+(\.\d+)?([eE][+-]?\d+)?</Rule>
+    <Rule color="Punctuation">[{}\[\],:]</Rule>
+
+  </RuleSet>
+</SyntaxDefinition>
