@@ -66,6 +66,17 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private string _status = "Not connected.";
 
+    /// <summary>
+    /// Detail behind <see cref="Status"/>: the connect report after a Connect attempt, or the
+    /// unwrapped exception chain after any other failure. The status bar only has room for one
+    /// line, and for Couchbase errors that line is rarely the informative one.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDiagnostics))]
+    private string _diagnostics = "";
+
+    public bool HasDiagnostics => !string.IsNullOrWhiteSpace(Diagnostics);
+
     // ---- Hierarchy ----
     public ObservableCollection<string> Buckets { get; } = new();
     public ObservableCollection<ScopeInfo> Scopes { get; } = new();
@@ -196,7 +207,7 @@ public partial class MainViewModel : ObservableObject
         await RunGuarded("Connecting…", async () =>
         {
             ResetHierarchy();
-            await _couchbase.ConnectAsync(new ConnectionSettings
+            Diagnostics = await _couchbase.ConnectAsync(new ConnectionSettings
             {
                 ConnectionString = ConnectionString,
                 Username = Username,
@@ -535,7 +546,10 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            Status = $"Error: {ex.Message}";
+            Status = $"Error: {ExceptionReport.Summarize(ex)}";
+            Diagnostics = ex is ClusterConnectException connectFailure
+                ? connectFailure.Report
+                : ExceptionReport.Describe(ex);
         }
         finally
         {

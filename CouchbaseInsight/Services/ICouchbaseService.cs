@@ -6,7 +6,14 @@ public interface ICouchbaseService : IAsyncDisposable
 {
     bool IsConnected { get; }
 
-    Task ConnectAsync(ConnectionSettings settings);
+    /// <summary>
+    /// Opens the cluster connection and returns a diagnostic report: the seed hosts, anything
+    /// suspicious about the connection string, and the node addresses the SDK resolved from the
+    /// cluster map. On failure throws <see cref="ClusterConnectException"/> carrying the same
+    /// report plus the unwrapped exception chain.
+    /// </summary>
+    Task<string> ConnectAsync(ConnectionSettings settings);
+
     Task DisconnectAsync();
 
     Task<IReadOnlyList<string>> GetBucketsAsync();

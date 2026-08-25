@@ -90,6 +90,18 @@
                     </StackPanel>
                 </StackPanel>
             </Grid>
+
+            <!-- Detail behind the status bar line: seed hosts, connection string warnings, the
+                 nodes the cluster actually advertised, and the unwrapped exception chain. -->
+            <Expander Header="Diagnostics" Margin="0,8,0,0" IsExpanded="True"
+                      Visibility="{Binding HasDiagnostics, Converter={StaticResource BoolToVis}}">
+                <TextBox Text="{Binding Diagnostics, Mode=OneWay}" IsReadOnly="True"
+                         FontFamily="Consolas" FontSize="11" MaxHeight="200" Margin="0,4,0,0"
+                         Padding="6" Background="#F7F7F7" BorderThickness="1"
+                         TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto"
+                         HorizontalScrollBarVisibility="Auto"
+                         ToolTip="Select and copy this when reporting a connection problem." />
+            </Expander>
           </StackPanel>
         </GroupBox>
 

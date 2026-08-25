@@ -25,8 +25,17 @@ cp CouchbaseInsight/appsettings.template.json CouchbaseInsight/appsettings.json
 `CouchbaseInsight/appsettings.json` is gitignored, so your edits stay local. The file is optional —
 the app starts fine without it.
 
-Set `UseNetworkResolutionExternal` to `true` when connecting through a public IP or SSH tunnel; it
-maps to `NetworkResolution.External` in the Couchbase SDK.
+Set `UseNetworkResolutionExternal` to `true` when connecting through a public IP or SSH tunnel, and
+`false` when you are on the same network as the nodes. The flag is passed to the SDK in both
+directions — `NetworkResolution.External` or `NetworkResolution.Default`, never `Auto`.
+
+That matters on any cluster where a node publishes an `external` alternate address. Under `Auto` the
+SDK may decide to address the *whole* cluster by those alternates, so a LAN connection to reachable
+internal IPs quietly retargets a public IP it cannot open a key-value socket to. Bootstrap still
+reports success, the SDK ends up holding no nodes, and every call afterwards fails with
+`Service mgmt is either not configured or cannot be reached` — an error that names the service it
+happened to ask for first and says nothing about the real cause. The app now rejects that state at
+connect time and says so in the diagnostics pane instead.
 
 ## Where credentials live
 
