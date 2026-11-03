@@ -110,7 +110,8 @@ public static class ConnectionDiagnostics
             sb.AppendLine("Nodes resolved from the cluster map: none — bootstrap never got that far.");
             sb.AppendLine();
             return;
-        }
+        } 
+
 
         sb.AppendLine("Nodes the SDK resolved from the cluster map (these replace the seeds):");
         if (resolvedNodes.Count == 0)

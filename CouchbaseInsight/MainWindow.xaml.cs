@@ -1,6 +1,9 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
+using System.Windows.Media;
 using CouchbaseInsight.Themes;
 using CouchbaseInsight.ViewModels;
 
@@ -11,11 +14,27 @@ public partial class MainWindow : Window
     // Guards against the two-way password sync below echoing back on itself.
     private bool _syncingPassword;
 
+    // True when DWM draws the window edge itself (Windows 11); false means WPF draws it.
+    private bool _nativeEdge;
+
     public MainWindow()
     {
         InitializeComponent();
         Loaded += OnLoaded;
         StateChanged += (_, _) => UpdateChrome();
+        ThemeManager.ThemeChanged += OnThemeChanged;
+        Closed += (_, _) => ThemeManager.ThemeChanged -= OnThemeChanged;
+    }
+
+    private void OnThemeChanged(AppTheme _) => UpdateEdgeColour();
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        var hwnd = new WindowInteropHelper(this).Handle;
+        int round = DwmwcpRound;
+        DwmSetWindowAttribute(hwnd, DwmwaWindowCornerPreference, ref round, sizeof(int));
+        UpdateEdgeColour();
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -78,13 +97,42 @@ public partial class MainWindow : Window
     {
         var maximised = WindowState == WindowState.Maximized;
 
+        // Restored: a 1px edge of our own, unless DWM already draws one.
         BorderThickness = maximised
             ? new Thickness(SystemParameters.WindowResizeBorderThickness.Left + 1)
-            : new Thickness(0);
+            : new Thickness(_nativeEdge ? 0 : 1);
+        SetResourceReference(BorderBrushProperty, maximised ? "Brush.Window" : "Brush.WindowEdge");
 
         MaximiseButton.Content = maximised ? "" : "";
         MaximiseButton.ToolTip = maximised ? "Restore" : "Maximise";
     }
+
+    /// <summary>
+    /// Paints the window edge in the theme's Brush.WindowEdge. Windows 11 takes it as the DWM
+    /// border colour, which follows the rounded corners; older Windows rejects the attribute, and
+    /// the window's own BorderBrush draws a square 1px edge instead. When maximised the brush is
+    /// set to the window background, so the inset in UpdateChrome stays invisible.
+    /// </summary>
+    private void UpdateEdgeColour()
+    {
+        var edge = (TryFindResource("Brush.WindowEdge") as SolidColorBrush)?.Color ?? Colors.Gray;
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != IntPtr.Zero)
+        {
+            int colorRef = edge.R | (edge.G << 8) | (edge.B << 16);
+            _nativeEdge = DwmSetWindowAttribute(hwnd, DwmwaBorderColor, ref colorRef, sizeof(int)) == 0;
+        }
+
+        UpdateChrome();
+    }
+
+    private const int DwmwaWindowCornerPreference = 33;
+    private const int DwmwaBorderColor = 34;
+    private const int DwmwcpRound = 2;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
     private void ThemeButton_OnClick(object sender, RoutedEventArgs e)
     {

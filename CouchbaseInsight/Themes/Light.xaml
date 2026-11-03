@@ -18,6 +18,9 @@
     <SolidColorBrush x:Key="Brush.Selected" Color="#DEE9FC" />
     <SolidColorBrush x:Key="Brush.Border" Color="#DBE1EA" />
     <SolidColorBrush x:Key="Brush.BorderSubtle" Color="#E9EDF3" />
+    <!-- The window's outer edge. Stronger than Brush.Border: it has to stand off whatever is on
+         the desktop behind, which may be as white as the window. -->
+    <SolidColorBrush x:Key="Brush.WindowEdge" Color="#9AA5B4" />
 
     <SolidColorBrush x:Key="Brush.Text" Color="#141C26" />
     <SolidColorBrush x:Key="Brush.TextSecondary" Color="#5A6675" />

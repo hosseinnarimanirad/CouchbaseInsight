@@ -5,13 +5,14 @@
         xmlns:ae="http://icsharpcode.net/sharpdevelop/avalonedit"
         xmlns:v="clr-namespace:CouchbaseInsight.Views"
         Title="Couchbase Insight"
+        Icon="/Assets/app.ico"
         Height="820" Width="1280" MinHeight="600" MinWidth="1000"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource Brush.Window}"
         Foreground="{DynamicResource Brush.Text}"
         FontFamily="{StaticResource Font.Ui}"
         UseLayoutRounding="True"
-        SnapsToDevicePixels="True">
+        SnapsToDevicePixels="True" >
 
     <!--
         The window draws its own caption. The title strip is the busiest row in the app — brand,
@@ -19,12 +20,17 @@
         title bar above it would be a second, emptier strip saying only the app's name.
         CaptionHeight makes that strip draggable and double-click-to-maximise for free; the controls
         sitting on it opt out with WindowChrome.IsHitTestVisibleInChrome.
+
+        GlassFrameThickness is 1, not 0: any non-zero frame keeps the DWM frame alive, and with it
+        the drop shadow (and, on Windows 11, the rounded corners and native border that
+        MainWindow.xaml.cs colours). At 0 the window is a bare rectangle, and a white one
+        disappears against a white desktop.
     -->
     <WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="38"
                             ResizeBorderThickness="6"
                             CornerRadius="0"
-                            GlassFrameThickness="0"
+                            GlassFrameThickness="0,0,0,1"
                             UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
 
@@ -84,12 +90,11 @@
                      something failed. -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center"
                             Margin="12,0,0,0">
-                    <Border Width="20" Height="20" CornerRadius="5"
-                            Background="{DynamicResource Brush.Brand}">
-                        <TextBlock Text="&#xE968;" FontFamily="{StaticResource Font.Icons}"
-                                   FontSize="11" Foreground="#FFFFFF"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
+                    <!-- The app icon itself, so the title bar, taskbar and .exe show one mark.
+                         The .ico carries a 20px frame drawn for this size. -->
+                    <Image Source="/Assets/app.ico" Width="20" Height="20"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
+
                     <TextBlock Text="Couchbase Insight" Style="{StaticResource Text.Title}"
                                VerticalAlignment="Center" Margin="9,0,0,0" />
                 </StackPanel>
@@ -131,6 +136,10 @@
                             <TextBlock Text="Connection" Margin="6,0,0,0" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
+                    <Button Style="{StaticResource Button.Icon}" Margin="0,0,4,0"
+                            Command="{Binding OpenOptionsCommand}" Content="&#xE713;"
+                            AutomationProperties.Name="Options"
+                            ToolTip="Options: batch size for whole-collection reads" />
                     <Button x:Name="ThemeButton" Style="{StaticResource Button.Icon}" Margin="0,0,4,0"
                             Click="ThemeButton_OnClick" Content="&#xE706;"
                             ToolTip="Switch between the light and dark theme" />
@@ -262,9 +271,12 @@
                 </StackPanel>
             </Border>
 
-            <!-- Keyspace picker: the path down to the documents being read -->
+            <!-- Keyspace picker: the path down to the documents being read, and what to do with them.
+                 Row 1 is the path and the actions; row 2 is how much of it is read and how big it is;
+                 the activity lines below appear only while something long is running. -->
             <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="10,8"
                     Margin="0,0,0,10">
+                <StackPanel>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" MinWidth="120" />
@@ -274,6 +286,8 @@
                         <ColumnDefinition Width="*" MinWidth="120" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" MinWidth="120" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
@@ -304,12 +318,71 @@
                               ItemsSource="{Binding DiscriminatorFields}"
                               Text="{Binding Discriminator, UpdateSourceTrigger=PropertyChanged}"
                               VerticalAlignment="Center"
-                              ToolTip="Discriminator — the field whose distinct values are the classes (type, _class, docType…). Pick one of the collection's properties or type your own." />
+                              ToolTip="Discriminator — the field whose distinct values are the classes (class, type, _class…). Pick one of the collection's properties or type your own." />
 
                     <Button Grid.Column="7" Content="Load classes" Margin="10,0,0,0"
                             Style="{StaticResource Button.Primary}"
                             Command="{Binding LoadClassesCommand}" />
+
+                    <Button Grid.Column="8" Content="Export…" Margin="6,0,0,0"
+                            Style="{StaticResource Button.Secondary}"
+                            Command="{Binding ExportCommand}"
+                            ToolTip="Read every document of the collection, in batches, and save a JSON summary: classes with count and %, min/max date per class, and every field's types, presence, requirement, flags and distinct values. Resumable." />
+
+                    <Button Grid.Column="9" Content="Open export…" Margin="6,0,0,0"
+                            Style="{StaticResource Button.Secondary}"
+                            Command="{Binding OpenExportFileCommand}"
+                            ToolTip="Show a saved export (or an unfinished export's checkpoint) in the Schema explorer, without querying the cluster." />
                 </Grid>
+
+                <!-- How much is read, and how big the collection is. -->
+                <DockPanel Margin="0,8,0,0">
+                    <TextBlock DockPanel.Dock="Left" Text="Scan limit" Style="{StaticResource Text.Label}"
+                               VerticalAlignment="Center" Margin="0,0,10,0" />
+
+                    <TextBox DockPanel.Dock="Left" Width="110" Style="{StaticResource TextBox.Mono}"
+                             AutomationProperties.Name="Scan limit"
+                             Tag="whole collection"
+                             Text="{Binding ScanLimit, UpdateSourceTrigger=PropertyChanged}"
+                             VerticalAlignment="Center"
+                             ToolTip="Read only the collection's first N documents (primary-key order) in Load classes, Analyze and distinct values. Empty or 0 reads the whole collection, in batches (batch size in Options). The Query tab is not limited." />
+
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding CollectionSummary}"
+                               Style="{StaticResource Text.Secondary}" VerticalAlignment="Center"
+                               Margin="12,0,0,0"
+                               ToolTip="Document count of the collection, from its item count (no scan)" />
+
+                    <TextBlock Text="{Binding ScanLimitSummary}" Style="{StaticResource Text.Secondary}"
+                               VerticalAlignment="Center" Margin="10,0,0,0" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+
+                <!-- Activity: whatever is running (with its progress and elapsed time), and an export.
+                     Each shows only while it runs. -->
+                <DockPanel Margin="0,8,0,0"
+                           Visibility="{Binding IsActivityVisible, Converter={StaticResource BoolVis}}">
+                    <Button DockPanel.Dock="Right" Content="Cancel" Margin="10,0,0,0"
+                            Style="{StaticResource Button.Small}"
+                            Command="{Binding CancelActivityCommand}"
+                            Visibility="{Binding IsActivityCancellable, Converter={StaticResource BoolVis}}"
+                            ToolTip="Stop it. A batched read keeps and shows what was counted so far." />
+                    <TextBlock Text="{Binding ActivityLine}" Style="{StaticResource Text.Mono}"
+                               Foreground="{DynamicResource Brush.Accent}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding ActivityLine}" />
+                </DockPanel>
+
+                <DockPanel Margin="0,8,0,0"
+                           Visibility="{Binding IsExporting, Converter={StaticResource BoolVis}}">
+                    <Button DockPanel.Dock="Right" Content="Cancel export" Margin="10,0,0,0"
+                            Style="{StaticResource Button.Small}"
+                            Command="{Binding CancelExportCommand}"
+                            ToolTip="Stop the export. Progress up to the last finished batch is saved; Export… again resumes it." />
+                    <TextBlock Text="{Binding ExportProgress}" Style="{StaticResource Text.Mono}"
+                               Foreground="{DynamicResource Brush.Accent}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding ExportProgress}" />
+                </DockPanel>
+                </StackPanel>
             </Border>
 
             <!-- Tabs -->
@@ -347,6 +420,24 @@
                                              Visibility="{Binding Classes.Count, Converter={StaticResource PositiveVis}}" />
                                 </Border>
 
+                                <DockPanel DockPanel.Dock="Top" Margin="12,0,8,2"
+                                           Visibility="{Binding OfflineSource, Converter={StaticResource NotEmptyVis}}">
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small.Icon}"
+                                            Content="&#xE711;" VerticalAlignment="Top"
+                                            AutomationProperties.Name="Close file"
+                                            Command="{Binding CloseExportFileCommand}"
+                                            ToolTip="Close the file and go back to the cluster" />
+                                    <TextBlock Style="{StaticResource Text.Caption}" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource Brush.Accent}"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding OfflineSource}" />
+                                </DockPanel>
+
+                                <TextBlock DockPanel.Dock="Top" Margin="12,0,12,4"
+                                           Style="{StaticResource Text.Caption}" TextWrapping="Wrap"
+                                           Text="{Binding ClassesCaption}"
+                                           Visibility="{Binding ClassesCaption, Converter={StaticResource NotEmptyVis}}" />
+
                                 <Border DockPanel.Dock="Bottom" Style="{StaticResource CardFooter}">
                                     <StackPanel>
                                         <CheckBox Style="{StaticResource Switch}"
@@ -363,7 +454,19 @@
                                 <Grid>
                                     <ListBox Style="{StaticResource EntryList}" AutomationProperties.Name="Classes"
                                              ItemsSource="{Binding ClassesView}"
-                                             SelectedItem="{Binding SelectedClass}">
+                                             SelectedItem="{Binding SelectedClassEntry}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel ToolTip="{Binding Tip}">
+                                                    <TextBlock DockPanel.Dock="Right" Margin="8,0,0,0"
+                                                               Style="{StaticResource Text.MonoCaption}"
+                                                               VerticalAlignment="Center"
+                                                               Text="{Binding CountText}" />
+                                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
+                                                               VerticalAlignment="Center" />
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
                                         <ListBox.InputBindings>
                                             <MouseBinding MouseAction="LeftDoubleClick"
                                                           Command="{Binding AnalyzeCommand}" />

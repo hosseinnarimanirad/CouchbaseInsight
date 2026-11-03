@@ -8,6 +8,9 @@ public class SchemaAnalyzer
     private readonly Dictionary<string, FieldAccumulator> _fields = new();
     private int _sampleSize;
 
+    /// <summary>Documents added so far.</summary>
+    public int SampleSize => _sampleSize;
+
     private sealed class FieldAccumulator
     {
         public int Occurrences;
@@ -47,7 +50,7 @@ public class SchemaAnalyzer
         }
     }
 
-    private static string DescribeType(JsonElement value) => value.ValueKind switch
+    internal static string DescribeType(JsonElement value) => value.ValueKind switch
     {
         JsonValueKind.String => "string",
         JsonValueKind.Number => "number",

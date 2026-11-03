@@ -13,6 +13,8 @@
     <SolidColorBrush x:Key="Brush.Selected" Color="#25334A" />
     <SolidColorBrush x:Key="Brush.Border" Color="#2A333F" />
     <SolidColorBrush x:Key="Brush.BorderSubtle" Color="#1F2731" />
+    <!-- The window's outer edge; see Light.xaml. -->
+    <SolidColorBrush x:Key="Brush.WindowEdge" Color="#46515F" />
 
     <SolidColorBrush x:Key="Brush.Text" Color="#E8EDF4" />
     <SolidColorBrush x:Key="Brush.TextSecondary" Color="#9BA7B6" />

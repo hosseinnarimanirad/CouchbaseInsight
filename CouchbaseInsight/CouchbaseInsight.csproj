@@ -9,7 +9,14 @@
     <RootNamespace>CouchbaseInsight</RootNamespace>
     <AssemblyName>CouchbaseInsight</AssemblyName>
     <UserSecretsId>af3ec514-faec-48d0-a9a7-707316dc5d23</UserSecretsId>
+    <!-- The .exe icon (Explorer, pinned shortcuts). The window and the title-bar wordmark use the
+         same file as a WPF resource, below. -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
