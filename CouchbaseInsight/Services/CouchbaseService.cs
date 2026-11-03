@@ -130,60 +130,83 @@ public class CouchbaseService : ICouchbaseService
             .ToList();
     }
 
-    public async Task<ClassCounts> GetClassesAsync(
-        string bucket, string scope, string collection, string discriminator, int? scanLimit,
-        CancellationToken cancellationToken = default)
-    {
-        var cluster = EnsureConnected();
-        var source = Source(Keyspace(bucket, scope, collection), scanLimit);
-        var field = EscapeIdentifier(discriminator);
-
-        // No WHERE: the documents without a class are counted too (their group has cls missing or
-        // null), so the percentages are of every document read, not only the classified ones.
-        var statement =
-            $"SELECT c.{field} AS cls, COUNT(*) AS n FROM {source} GROUP BY c.{field}";
-
-        var result = await cluster.QueryAsync<JsonElement>(
-            statement, new QueryOptions().CancellationToken(cancellationToken));
-
-        var counts = new List<(string Name, long Count)>();
-        long total = 0, withoutClass = 0;
-        await foreach (var row in result)
-        {
-            if (row.ValueKind != JsonValueKind.Object || !row.TryGetProperty("n", out var n)) continue;
-            var count = n.GetInt64();
-            total += count;
-
-            if (row.TryGetProperty("cls", out var cls) && cls.ValueKind != JsonValueKind.Null)
-                counts.Add((ValueToString(cls), count));
-            else
-                withoutClass += count;
-        }
-
-        var classes = counts
-            .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(c => new ClassEntry(c.Name, c.Count, total == 0 ? 0 : c.Count * 100.0 / total))
-            .ToList();
-        return new ClassCounts(classes, total, withoutClass);
-    }
-
-    public async Task<long> CountDocumentsAsync(string bucket, string scope, string collection)
+    public async Task<long> CountDocumentsAsync(
+        string bucket, string scope, string collection, CancellationToken cancellationToken = default)
     {
         var cluster = EnsureConnected();
         // COUNT(*) with no WHERE is answered from the collection's item count, not by a scan.
         var result = await cluster.QueryAsync<long>(
-            $"SELECT RAW COUNT(*) FROM {Keyspace(bucket, scope, collection)}");
+            $"SELECT RAW COUNT(*) FROM {Keyspace(bucket, scope, collection)}",
+            new QueryOptions().CancellationToken(cancellationToken));
         await foreach (var n in result) return n;
         return 0;
     }
+
+    public async IAsyncEnumerable<DocumentRow> ReadRangeAsync(
+        string bucket, string scope, string collection, string afterKey, string? endKey,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var cluster = EnsureConnected();
+
+        // A key range on the primary index, with no ORDER BY: the range alone says which documents
+        // belong to it, so the server can hand rows over as soon as they are fetched. The expiry and
+        // CAS are metadata the server holds with each document: a few bytes, no extra lookup.
+        var statement =
+            $"SELECT META(d).id AS k, META(d).expiration AS exp, META(d).cas AS cas, d AS doc " +
+            $"FROM {Keyspace(bucket, scope, collection)} AS d " +
+            (endKey is null ? "WHERE META(d).id > $after" : "WHERE META(d).id > $after AND META(d).id <= $end");
+
+        // Fetching is what limits a read: the query service gets documents from the data service in
+        // groups of pipeline_batch (default 16), with at most pipeline_cap rows queued per operator.
+        // Larger groups mean far fewer round trips per document.
+        var options = new QueryOptions()
+            .Parameter("after", afterKey)
+            .PipelineBatch(FetchBatch)
+            .PipelineCap(FetchQueue)
+            .Timeout(PageTimeout)
+            .CancellationToken(cancellationToken);
+        if (endKey is not null) options.Parameter("end", endKey);
+
+        var result = await cluster.QueryAsync<JsonElement>(statement, ForBatchWork(options));
+        await foreach (var row in result.WithCancellation(cancellationToken))
+        {
+            if (row.ValueKind != JsonValueKind.Object || !row.TryGetProperty("k", out var key)) continue;
+            // A binary (non-JSON) document has a key but no doc: hand it on as Undefined.
+            var doc = row.TryGetProperty("doc", out var d) ? d : default;
+            var exp = row.TryGetProperty("exp", out var e) && e.ValueKind == JsonValueKind.Number &&
+                      e.TryGetInt64(out var expValue) ? expValue : 0;
+            // A CAS is a 64-bit unsigned integer: read it as one, not through a double.
+            var cas = row.TryGetProperty("cas", out var c) && c.ValueKind == JsonValueKind.Number &&
+                      c.TryGetUInt64(out var casValue) ? casValue : 0UL;
+            yield return new DocumentRow(key.GetString() ?? "", doc, exp, cas);
+        }
+    }
+
+    private const int FetchBatch = 256;
+    private const int FetchQueue = 8192;
+
+    /// <summary>
+    /// Gentle mode: batch queries leave room for the live application on the same cluster. One
+    /// fetch thread per query (max_parallelism 1), the server's own fetch sizes (pipeline_batch 16,
+    /// pipeline_cap 512) instead of large groups, and a short timeout so a query that has stalled
+    /// is stopped by the server rather than holding resources for hours. Off: fetch in large groups
+    /// with a long timeout, for the fastest read.
+    /// </summary>
+    public bool GentleMode { get; set; } = true;
+
+    private static readonly TimeSpan GentleTimeout = TimeSpan.FromMinutes(5);
+
+    /// <summary>The settings every batch query runs with, gentle or fast. Applied last, so they win.</summary>
+    private QueryOptions ForBatchWork(QueryOptions options) => GentleMode
+        ? options.PipelineBatch(16).PipelineCap(512).MaxServerParallelism(1).Timeout(GentleTimeout)
+        : options.PipelineBatch(FetchBatch).PipelineCap(FetchQueue).Timeout(PageTimeout);
 
     public async Task<string?> GetBatchEndKeyAsync(
         string bucket, string scope, string collection, string afterKey, int batchSize,
         CancellationToken cancellationToken = default)
     {
         var cluster = EnsureConnected();
-        // Keys only: the primary index answers this without fetching a single document, so
-        // finding where a batch of a million ends costs a walk over a million index entries.
+        // Keys only: the primary index answers this without fetching a single document.
         var statement =
             $"SELECT RAW META(d).id FROM {Keyspace(bucket, scope, collection)} AS d " +
             $"WHERE META(d).id > $after ORDER BY META(d).id OFFSET {batchSize - 1} LIMIT 1";
@@ -192,162 +215,180 @@ public class CouchbaseService : ICouchbaseService
             .Parameter("after", afterKey)
             .Timeout(PageTimeout)
             .CancellationToken(cancellationToken);
-        var result = await cluster.QueryAsync<string>(statement, options);
+        var result = await cluster.QueryAsync<string>(statement, ForBatchWork(options));
         await foreach (var key in result.WithCancellation(cancellationToken))
             return key;
         return null;
     }
 
-    public async Task<IReadOnlyList<(string? Class, long Count)>> CountClassesInRangeAsync(
+    public async Task<IReadOnlyList<(string? Class, long Count, IReadOnlyList<string> Keys)>> CountClassesInRangeAsync(
         string bucket, string scope, string collection, string discriminator,
-        string afterKey, string? endKey, CancellationToken cancellationToken = default)
+        string afterKey, string? endKey, int keysPerClass = 0, CancellationToken cancellationToken = default)
     {
         var cluster = EnsureConnected();
         var field = EscapeIdentifier(discriminator);
+        // Counted on the server: only one row per class comes back, however many documents.
         var statement =
-            $"SELECT c.{field} AS cls, COUNT(*) AS n FROM {Keyspace(bucket, scope, collection)} AS c " +
-            KeyRange("c", endKey) +
+            $"SELECT c.{field} AS cls, COUNT(*) AS n" +
+            // A few keys of each class, so its sample can later be fetched by key without searching.
+            (keysPerClass > 0 ? $", ARRAY_AGG(META(c).id)[0:LEAST({keysPerClass}, COUNT(*))] AS ks" : "") +
+            $" FROM {Keyspace(bucket, scope, collection)} AS c " +
+            (endKey is null ? "WHERE META(c).id > $after" : "WHERE META(c).id > $after AND META(c).id <= $end") +
             $" GROUP BY c.{field}";
 
-        var options = RangeOptions(afterKey, endKey, cancellationToken);
-        var result = await cluster.QueryAsync<JsonElement>(statement, options);
+        var options = new QueryOptions()
+            .Parameter("after", afterKey)
+            .Timeout(PageTimeout)
+            .CancellationToken(cancellationToken);
+        if (endKey is not null) options.Parameter("end", endKey);
 
-        var counts = new List<(string?, long)>();
+        var result = await cluster.QueryAsync<JsonElement>(statement, ForBatchWork(options));
+        var counts = new List<(string?, long, IReadOnlyList<string>)>();
         await foreach (var row in result.WithCancellation(cancellationToken))
         {
             if (row.ValueKind != JsonValueKind.Object || !row.TryGetProperty("n", out var n)) continue;
             var name = row.TryGetProperty("cls", out var cls) && cls.ValueKind != JsonValueKind.Null
                 ? ValueToString(cls)
                 : null;
-            counts.Add((name, n.GetInt64()));
+            var keys = row.TryGetProperty("ks", out var ks) && ks.ValueKind == JsonValueKind.Array
+                ? ks.EnumerateArray().Where(k => k.ValueKind == JsonValueKind.String).Select(k => k.GetString()!).ToList()
+                : new List<string>();
+            counts.Add((name, n.GetInt64(), keys));
         }
         return counts;
     }
 
-    public async IAsyncEnumerable<JsonElement> ReadClassInRangeAsync(
-        string bucket, string scope, string collection, string discriminator, string className,
-        string afterKey, string? endKey,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<(string Key, JsonElement Document)>> GetDocumentsByKeysAsync(
+        string bucket, string scope, string collection, IReadOnlyList<string> keys,
+        CancellationToken cancellationToken = default)
     {
         var cluster = EnsureConnected();
-        var field = EscapeIdentifier(discriminator);
-        var statement =
-            $"SELECT RAW c FROM {Keyspace(bucket, scope, collection)} AS c " +
-            KeyRange("c", endKey) +
-            $" AND c.{field} = $cls";
+        // USE KEYS: fetched directly by key, no scan or index lookup.
+        var statement = $"SELECT META(c).id AS k, c AS doc FROM {Keyspace(bucket, scope, collection)} AS c USE KEYS $keys";
+        var options = new QueryOptions().Parameter("keys", keys).CancellationToken(cancellationToken);
 
-        var options = RangeOptions(afterKey, endKey, cancellationToken).Parameter("cls", className);
-        var result = await cluster.QueryAsync<JsonElement>(statement, options);
-        await foreach (var row in result.WithCancellation(cancellationToken))
-            yield return row;
+        var result = await cluster.QueryAsync<JsonElement>(statement, ForBatchWork(options));
+        return await KeyedRows(result, cancellationToken);
     }
 
-    /// <summary>WHERE on a key range: (after, end], or everything after <c>after</c> for the last batch.</summary>
-    private static string KeyRange(string alias, string? endKey) =>
-        endKey is null
-            ? $"WHERE META({alias}).id > $after"
-            : $"WHERE META({alias}).id > $after AND META({alias}).id <= $end";
-
-    private static QueryOptions RangeOptions(string afterKey, string? endKey, CancellationToken ct)
+    /// <summary>Rows of {k, doc} as (key, document).</summary>
+    private static async Task<IReadOnlyList<(string Key, JsonElement Document)>> KeyedRows(
+        IQueryResult<JsonElement> result, CancellationToken ct)
     {
-        var options = new QueryOptions()
-            .Parameter("after", afterKey)
-            .Timeout(PageTimeout)
-            .CancellationToken(ct);
-        return endKey is null ? options : options.Parameter("end", endKey);
+        var docs = new List<(string, JsonElement)>();
+        await foreach (var row in result.WithCancellation(ct))
+        {
+            if (row.ValueKind != JsonValueKind.Object || !row.TryGetProperty("k", out var k)) continue;
+            docs.Add((k.GetString() ?? "", row.TryGetProperty("doc", out var d) ? d.Clone() : default));
+        }
+        return docs;
     }
 
-    public async IAsyncEnumerable<(string Key, JsonElement Document)> ReadPageAsync(
-        string bucket, string scope, string collection, string? afterKey, int pageSize,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<(string Key, JsonElement Document)>> GetFirstDocumentsAsync(
+        string bucket, string scope, string collection, int limit, CancellationToken cancellationToken = default)
     {
         var cluster = EnsureConnected();
-
-        // Keyset paging on the primary index: the range on META().id and the ORDER BY both follow
-        // the index's own key order, so each page starts where the last one stopped without the
-        // server skipping over the pages before it (which an OFFSET would make it do).
+        // The first documents by key: straight off the primary index, in its own order, so the
+        // server reads only these few.
         var statement =
-            $"SELECT META(d).id AS k, d AS doc FROM {Keyspace(bucket, scope, collection)} AS d " +
-            $"WHERE META(d).id > $after ORDER BY META(d).id LIMIT {pageSize}";
+            $"SELECT META(c).id AS k, c AS doc FROM {Keyspace(bucket, scope, collection)} AS c " +
+            $"ORDER BY META(c).id LIMIT {limit}";
+        var result = await cluster.QueryAsync<JsonElement>(
+            statement, new QueryOptions().Timeout(TimeSpan.FromSeconds(30)).CancellationToken(cancellationToken));
+        return await KeyedRows(result, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<(string Key, JsonElement Document)>> GetClassSampleAsync(
+        string bucket, string scope, string collection, string discriminator, string? className, int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var cluster = EnsureConnected();
+        var disc = EscapeIdentifier(discriminator);
+        var statement =
+            $"SELECT META(c).id AS k, c AS doc FROM {Keyspace(bucket, scope, collection)} AS c WHERE " +
+            (className is null ? $"(c.{disc} IS MISSING OR c.{disc} IS NULL)" : $"c.{disc} = $cls") +
+            $" LIMIT {limit}";
 
         var options = new QueryOptions()
-            .Parameter("after", afterKey ?? "")
+            .PipelineBatch(FetchBatch)
+            .PipelineCap(FetchQueue)
             .Timeout(PageTimeout)
             .CancellationToken(cancellationToken);
+        if (className is not null) options.Parameter("cls", className);
 
-        var result = await cluster.QueryAsync<JsonElement>(statement, options);
+        var result = await cluster.QueryAsync<JsonElement>(statement, ForBatchWork(options));
+        return await KeyedRows(result, cancellationToken);
+    }
+
+    /// <summary>The pseudo-field each document contributes once: counts the documents of each class read.</summary>
+    public const string DocumentsField = "__documents";
+
+    public async Task<IReadOnlyList<FieldValueRow>> CountFieldValuesInRangeAsync(
+        string bucket, string scope, string collection, string discriminator,
+        IReadOnlyList<string> fields, string afterKey, string? endKey, int topPerField, bool windowed,
+        CancellationToken cancellationToken = default)
+    {
+        var cluster = EnsureConnected();
+        var disc = EscapeIdentifier(discriminator);
+
+        // One pass over the range for every class and every field asked: each document becomes one
+        // (field name, value) pair per field, and the pairs are grouped by class, field and value.
+        // The documents are read once however many fields and classes there are, and only counts
+        // come back. A constant pseudo-field counts the documents of each class that were read.
+        var pairs = string.Join(", ",
+            new[] { $"{{\"n\": \"{DocumentsField}\", \"v\": true}}" }.Concat(fields.Select(f =>
+                $"{{\"n\": {JsonSerializer.Serialize(f)}, \"v\": {NestedFieldExpr("c", f)}}}")));
+        var where =
+            (endKey is null ? "META(c).id > $after" : "META(c).id > $after AND META(c).id <= $end") +
+            " AND f.v IS NOT MISSING";
+
+        // Windowed: the server also returns, per class and field, how many distinct values the range
+        // held, how many documents held the field, and min/max, and keeps only the top values.
+        var inner =
+            $"SELECT c.{disc} AS cls, f.n AS fld, f.v AS val, COUNT(1) AS cnt, MIN(META(c).id) AS ex" +
+            (windowed
+                ? $", RANK() OVER (PARTITION BY c.{disc}, f.n ORDER BY COUNT(1) DESC) AS rk" +
+                  $", COUNT(1) OVER (PARTITION BY c.{disc}, f.n) AS ng" +
+                  $", SUM(COUNT(1)) OVER (PARTITION BY c.{disc}, f.n) AS total" +
+                  $", MIN(f.v) OVER (PARTITION BY c.{disc}, f.n) AS mn" +
+                  $", MAX(f.v) OVER (PARTITION BY c.{disc}, f.n) AS mx"
+                : "") +
+            $" FROM {Keyspace(bucket, scope, collection)} AS c UNNEST [{pairs}] AS f" +
+            $" WHERE {where} GROUP BY c.{disc}, f.n, f.v";
+        var statement = windowed
+            ? $"SELECT t.cls, t.fld, t.val, t.cnt, t.ex, t.ng, t.total, t.mn, t.mx FROM ({inner}) AS t WHERE t.rk <= {topPerField}"
+            : inner;
+
+        var options = new QueryOptions()
+            .Parameter("after", afterKey)
+            .PipelineBatch(FetchBatch)
+            .PipelineCap(FetchQueue)
+            .Timeout(PageTimeout)
+            .CancellationToken(cancellationToken);
+        if (endKey is not null) options.Parameter("end", endKey);
+
+        var result = await cluster.QueryAsync<JsonElement>(statement, ForBatchWork(options));
+        var rows = new List<FieldValueRow>();
         await foreach (var row in result.WithCancellation(cancellationToken))
         {
-            if (row.ValueKind != JsonValueKind.Object || !row.TryGetProperty("k", out var key)) continue;
-            // A binary (non-JSON) document has a key but no doc: hand it on as Undefined.
-            var doc = row.TryGetProperty("doc", out var d) ? d : default;
-            yield return (key.GetString() ?? "", doc);
+            if (row.ValueKind != JsonValueKind.Object || !row.TryGetProperty("fld", out var fld)) continue;
+            var cls = row.TryGetProperty("cls", out var c) && c.ValueKind != JsonValueKind.Null ? ValueToString(c) : null;
+            var val = row.TryGetProperty("val", out var v) ? v.Clone() : default;
+            long? Num(string name) => row.TryGetProperty(name, out var n) && n.ValueKind == JsonValueKind.Number
+                ? n.GetInt64() : null;
+            JsonElement? El(string name) => row.TryGetProperty(name, out var e) ? e.Clone() : null;
+            rows.Add(new FieldValueRow(
+                cls, fld.GetString() ?? "", val, Num("cnt") ?? 0,
+                windowed ? Num("ng") : null, windowed ? Num("total") : null,
+                windowed ? El("mn") : null, windowed ? El("mx") : null,
+                row.TryGetProperty("ex", out var ex) && ex.ValueKind == JsonValueKind.String ? ex.GetString() : null));
         }
+        return rows;
     }
 
     /// <summary>One page streams up to a few million documents; the SDK's default 75 s query
     /// timeout is for interactive queries and would cut it off part-way.</summary>
     private static readonly TimeSpan PageTimeout = TimeSpan.FromHours(3);
-
-    public async Task<ClassSchema> AnalyzeClassAsync(
-        string bucket, string scope, string collection,
-        string discriminator, string className, int? limit, int? scanLimit,
-        IProgress<int>? progress = null, CancellationToken cancellationToken = default)
-    {
-        var cluster = EnsureConnected();
-        var source = Source(Keyspace(bucket, scope, collection), scanLimit);
-        var field = EscapeIdentifier(discriminator);
-
-        var statement =
-            $"SELECT c.* FROM {source} WHERE c.{field} = $cls";
-        if (limit is > 0)
-            statement += $" LIMIT {limit.Value}";
-
-        var options = new QueryOptions().Parameter("cls", className).CancellationToken(cancellationToken);
-        var result = await cluster.QueryAsync<JsonElement>(statement, options);
-
-        var analyzer = new SchemaAnalyzer();
-        await foreach (var row in result.WithCancellation(cancellationToken))
-        {
-            analyzer.Add(row);
-            if (analyzer.SampleSize % 250 == 0) progress?.Report(analyzer.SampleSize);
-        }
-        progress?.Report(analyzer.SampleSize);
-
-        return analyzer.Build(className);
-    }
-
-    public async Task<IReadOnlyList<string>> GetDistinctValuesAsync(
-        string bucket, string scope, string collection,
-        string discriminator, string className,
-        string fieldPath, int limit, int? scanLimit,
-        CancellationToken cancellationToken = default)
-    {
-        var cluster = EnsureConnected();
-        var source = Source(Keyspace(bucket, scope, collection), scanLimit);
-        var discField = EscapeIdentifier(discriminator);
-        var fieldExpr = NestedFieldExpr("c", fieldPath);
-
-        var statement =
-            $"SELECT DISTINCT RAW {fieldExpr} " +
-            $"FROM {source} " +
-            $"WHERE c.{discField} = $cls " +
-            $"AND {fieldExpr} IS NOT MISSING " +
-            $"LIMIT {limit}";
-
-        var options = new QueryOptions()
-            .Parameter("cls", className)
-            .CancellationToken(cancellationToken);
-
-        var result = await cluster.QueryAsync<JsonElement>(statement, options);
-
-        var values = new List<string>();
-        await foreach (var row in result.WithCancellation(cancellationToken))
-            values.Add(DisplayValue(row));
-
-        values.Sort(StringComparer.OrdinalIgnoreCase);
-        return values;
-    }
 
     public async Task<IReadOnlyList<FieldInfo>> GetCollectionFieldsAsync(
         string bucket, string scope, string collection, int limit = 500)
@@ -379,18 +420,6 @@ public class CouchbaseService : ICouchbaseService
     }
 
     public async ValueTask DisposeAsync() => await DisconnectAsync();
-
-    /// <summary>
-    /// The FROM term, aliased <c>c</c>: the whole collection, or only its first
-    /// <paramref name="scanLimit"/> documents. The LIMIT sits inside the subquery, before any
-    /// WHERE, so on a collection with only a primary index the server stops after that many keys
-    /// instead of fetching every document to test the condition — the outer query then filters and
-    /// groups a bounded sample. "First" is primary-key order, not newest.
-    /// </summary>
-    private static string Source(string keyspace, int? scanLimit) =>
-        scanLimit is > 0
-            ? $"(SELECT RAW d FROM {keyspace} AS d LIMIT {scanLimit.Value}) AS c"
-            : $"{keyspace} AS c";
 
     private ICluster EnsureConnected() =>
         _cluster ?? throw new InvalidOperationException("Not connected to a cluster.");

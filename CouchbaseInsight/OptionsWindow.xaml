@@ -13,13 +13,48 @@
         <TextBlock Text="Batch size" Style="{StaticResource Text.Label}" Margin="0,0,0,6" />
         <ComboBox x:Name="BatchSizeBox" IsEditable="True" Style="{StaticResource ComboBox.Mono}"
                   AutomationProperties.Name="Batch size">
+            <ComboBoxItem Content="100,000" />
+            <ComboBoxItem Content="250,000" />
             <ComboBoxItem Content="500,000" />
             <ComboBoxItem Content="1,000,000" />
-            <ComboBoxItem Content="2,000,000" />
-            <ComboBoxItem Content="5,000,000" />
         </ComboBox>
         <TextBlock Style="{StaticResource Text.Caption}" TextWrapping="Wrap" Margin="0,6,0,0"
-                   Text="Documents read per batch when a whole collection is read: Load classes and Analyze with no scan limit, and Export collection. Each batch is one server query and one progress step; an export saves its progress after each batch. Default 1,000,000." />
+                   Text="Documents per batch: each Load, Analyze and Deep load query covers this many keys, and each batch is one progress step (Deep load also saves its progress after each). Smaller batches are lighter on the cluster. Default 100,000." />
+
+        <TextBlock Text="Gentle mode" Style="{StaticResource Text.Label}" Margin="0,18,0,6" />
+        <CheckBox x:Name="GentleSwitch" Style="{StaticResource Switch}" HorizontalAlignment="Left"
+                  Content="On" AutomationProperties.Name="Gentle mode"
+                  Checked="GentleSwitch_OnChanged" Unchecked="GentleSwitch_OnChanged" />
+        <TextBlock Style="{StaticResource Text.Caption}" TextWrapping="Wrap" Margin="0,6,0,0"
+                   Text="Go easy on the cluster the live application uses: one batch at a time, a 2-second pause between batches, and each query with one fetch thread, small fetch groups and a 5-minute server timeout. Slower, but safe to run on production. Default on." />
+
+        <TextBlock Text="Parallel reads" Style="{StaticResource Text.Label}" Margin="0,18,0,6" />
+        <ComboBox x:Name="ParallelBox" IsEditable="True" Style="{StaticResource ComboBox.Mono}"
+                  AutomationProperties.Name="Parallel reads">
+            <ComboBoxItem Content="1" />
+            <ComboBoxItem Content="2" />
+            <ComboBoxItem Content="4" />
+            <ComboBoxItem Content="8" />
+        </ComboBox>
+        <TextBlock Style="{StaticResource Text.Caption}" TextWrapping="Wrap" Margin="0,6,0,0"
+                   Text="How many batches run at the same time, each as its own query, when gentle mode is off (gentle mode always uses 1). More at once is faster, and each one adds load to the cluster. Default 4." />
+
+        <TextBlock Text="Scan limit" Style="{StaticResource Text.Label}" Margin="0,18,0,6" />
+        <DockPanel>
+            <CheckBox x:Name="ScanLimitSwitch" DockPanel.Dock="Left" Style="{StaticResource Switch}"
+                      VerticalAlignment="Center" Margin="0,0,12,0" Content="On"
+                      AutomationProperties.Name="Scan limit on by default"
+                      Checked="ScanLimitSwitch_OnChanged" Unchecked="ScanLimitSwitch_OnChanged" />
+            <ComboBox x:Name="ScanLimitBox" IsEditable="True" Style="{StaticResource ComboBox.Mono}"
+                      AutomationProperties.Name="Default scan limit">
+                <ComboBoxItem Content="10,000" />
+                <ComboBoxItem Content="50,000" />
+                <ComboBoxItem Content="100,000" />
+                <ComboBoxItem Content="1,000,000" />
+            </ComboBox>
+        </DockPanel>
+        <TextBlock Style="{StaticResource Text.Caption}" TextWrapping="Wrap" Margin="0,6,0,0"
+                   Text="On: Load reads the first N documents by key. Off: the whole collection. This is the same switch as the one beside Load, which is remembered between sessions; the number is where the box starts. Default on, 50,000." />
 
         <TextBlock x:Name="ErrorText" Style="{StaticResource Text.Caption}" TextWrapping="Wrap"
                    Foreground="{DynamicResource Brush.Danger}" Margin="0,8,0,0" Visibility="Collapsed" />

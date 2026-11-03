@@ -1,7 +1,31 @@
+using System.ComponentModel;
+
 namespace CouchbaseInsight.Models;
 
-public class FieldInfo
+public class FieldInfo : INotifyPropertyChanged
 {
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private bool _isSelected;
+
+    /// <summary>Ticked for the next "Analyze selected" pass.</summary>
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (_isSelected == value) return;
+            _isSelected = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+        }
+    }
+
+    /// <summary>Counted over every document of the class (not only the sample).</summary>
+    public bool IsAnalyzed { get; set; }
+
+    /// <summary>Never seen as an object or an array: a value that can be counted as it is.</summary>
+    public bool IsScalar => !Types.Contains("object") && !Types.Contains("array");
+
     public string Name { get; set; } = "";
     public string Types { get; set; } = "";
     public int Occurrences { get; set; }

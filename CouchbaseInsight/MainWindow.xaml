@@ -208,10 +208,17 @@
                         </Grid.ColumnDefinitions>
 
                         <TextBlock Text="CLUSTER" Style="{StaticResource Text.Label}" />
-                        <TextBox Grid.Column="1" Style="{StaticResource TextBox.Mono}"
-                                 VerticalAlignment="Center" AutomationProperties.Name="Connection string"
-                                 Text="{Binding ConnectionString, UpdateSourceTrigger=PropertyChanged}"
-                                 Tag="couchbases://host1,host2" />
+                        <DockPanel Grid.Column="1" VerticalAlignment="Center">
+                            <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small.Icon}"
+                                    Content="&#xE8C8;" Margin="4,0,0,0"
+                                    AutomationProperties.Name="Copy connection string"
+                                    Command="{Binding CopyConnectionStringCommand}"
+                                    ToolTip="Copy the connection string" />
+                            <TextBox Style="{StaticResource TextBox.Mono}"
+                                     VerticalAlignment="Center" AutomationProperties.Name="Connection string"
+                                     Text="{Binding ConnectionString, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="couchbases://host1,host2" />
+                        </DockPanel>
 
                         <TextBlock Grid.Column="2" Text="USER" Style="{StaticResource Text.Label}"
                                    Margin="14,0,7,0" />
@@ -289,6 +296,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
                     <ComboBox Grid.Column="0" ItemsSource="{Binding Buckets}" Tag="Bucket"
@@ -320,16 +328,22 @@
                               VerticalAlignment="Center"
                               ToolTip="Discriminator — the field whose distinct values are the classes (class, type, _class…). Pick one of the collection's properties or type your own." />
 
-                    <Button Grid.Column="7" Content="Load classes" Margin="10,0,0,0"
+                    <Button Grid.Column="7" Content="Load" Margin="10,0,0,0"
+                            ToolTip="Step 1: count every class over the whole collection, on the server; no document is downloaded. Then select a class to list its fields from a small sample, tick fields and press Analyze selected."
                             Style="{StaticResource Button.Primary}"
                             Command="{Binding LoadClassesCommand}" />
 
-                    <Button Grid.Column="8" Content="Export…" Margin="6,0,0,0"
+                    <Button Grid.Column="8" Content="Deep load" Margin="6,0,0,0"
+                            Style="{StaticResource Button.Secondary}"
+                            ToolTip="Download the documents (up to the scan limit) and summarise everything in the app: every field of every class, values, samples, first/last seen, TTL, key shapes. Thorough, but limited by the network."
+                            Command="{Binding DeepLoadCommand}" />
+
+                    <Button Grid.Column="9" Content="Export…" Margin="6,0,0,0"
                             Style="{StaticResource Button.Secondary}"
                             Command="{Binding ExportCommand}"
-                            ToolTip="Read every document of the collection, in batches, and save a JSON summary: classes with count and %, min/max date per class, and every field's types, presence, requirement, flags and distinct values. Resumable." />
+                            ToolTip="Save what Load gathered as a JSON summary. Reads nothing; available after a Load." />
 
-                    <Button Grid.Column="9" Content="Open export…" Margin="6,0,0,0"
+                    <Button Grid.Column="10" Content="Open export…" Margin="6,0,0,0"
                             Style="{StaticResource Button.Secondary}"
                             Command="{Binding OpenExportFileCommand}"
                             ToolTip="Show a saved export (or an unfinished export's checkpoint) in the Schema explorer, without querying the cluster." />
@@ -337,15 +351,18 @@
 
                 <!-- How much is read, and how big the collection is. -->
                 <DockPanel Margin="0,8,0,0">
-                    <TextBlock DockPanel.Dock="Left" Text="Scan limit" Style="{StaticResource Text.Label}"
-                               VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <CheckBox DockPanel.Dock="Left" Style="{StaticResource Switch}"
+                              Content="Scan limit" VerticalAlignment="Center" Margin="0,0,10,0"
+                              AutomationProperties.Name="Scan limit on"
+                              IsChecked="{Binding IsScanLimitOn}"
+                              ToolTip="On: Deep load and Analyze read only the first N documents by key. Off: the whole collection. Load (class counts) always covers every document." />
 
                     <TextBox DockPanel.Dock="Left" Width="110" Style="{StaticResource TextBox.Mono}"
                              AutomationProperties.Name="Scan limit"
-                             Tag="whole collection"
                              Text="{Binding ScanLimit, UpdateSourceTrigger=PropertyChanged}"
+                             IsEnabled="{Binding IsScanLimitOn}"
                              VerticalAlignment="Center"
-                             ToolTip="Read only the collection's first N documents (primary-key order) in Load classes, Analyze and distinct values. Empty or 0 reads the whole collection, in batches (batch size in Options). The Query tab is not limited." />
+                             ToolTip="How many documents Load reads while the limit is on: the first N by key. It reads them in pages of the Options batch size. The Query tab is not limited." />
 
                     <TextBlock DockPanel.Dock="Right" Text="{Binding CollectionSummary}"
                                Style="{StaticResource Text.Secondary}" VerticalAlignment="Center"
@@ -356,43 +373,17 @@
                                VerticalAlignment="Center" Margin="10,0,0,0" TextTrimming="CharacterEllipsis" />
                 </DockPanel>
 
-                <!-- Activity: whatever is running (with its progress and elapsed time), and an export.
-                     Each shows only while it runs. -->
-                <DockPanel Margin="0,8,0,0"
-                           Visibility="{Binding IsActivityVisible, Converter={StaticResource BoolVis}}">
-                    <Button DockPanel.Dock="Right" Content="Cancel" Margin="10,0,0,0"
-                            Style="{StaticResource Button.Small}"
-                            Command="{Binding CancelActivityCommand}"
-                            Visibility="{Binding IsActivityCancellable, Converter={StaticResource BoolVis}}"
-                            ToolTip="Stop it. A batched read keeps and shows what was counted so far." />
-                    <TextBlock Text="{Binding ActivityLine}" Style="{StaticResource Text.Mono}"
-                               Foreground="{DynamicResource Brush.Accent}"
-                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                               ToolTip="{Binding ActivityLine}" />
-                </DockPanel>
-
-                <DockPanel Margin="0,8,0,0"
-                           Visibility="{Binding IsExporting, Converter={StaticResource BoolVis}}">
-                    <Button DockPanel.Dock="Right" Content="Cancel export" Margin="10,0,0,0"
-                            Style="{StaticResource Button.Small}"
-                            Command="{Binding CancelExportCommand}"
-                            ToolTip="Stop the export. Progress up to the last finished batch is saved; Export… again resumes it." />
-                    <TextBlock Text="{Binding ExportProgress}" Style="{StaticResource Text.Mono}"
-                               Foreground="{DynamicResource Brush.Accent}"
-                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                               ToolTip="{Binding ExportProgress}" />
-                </DockPanel>
                 </StackPanel>
             </Border>
 
             <!-- Tabs -->
-            <TabControl>
+            <TabControl SelectedIndex="{Binding SelectedTabIndex}">
 
                 <!-- ===================== Schema explorer ==================== -->
                 <TabItem Header="Schema explorer">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="270" MinWidth="200" />
+                            <ColumnDefinition Width="380" MinWidth="280" />
                             <ColumnDefinition Width="10" />
                             <ColumnDefinition Width="*" MinWidth="420" />
                         </Grid.ColumnDefinitions>
@@ -438,18 +429,20 @@
                                            Text="{Binding ClassesCaption}"
                                            Visibility="{Binding ClassesCaption, Converter={StaticResource NotEmptyVis}}" />
 
-                                <Border DockPanel.Dock="Bottom" Style="{StaticResource CardFooter}">
-                                    <StackPanel>
-                                        <CheckBox Style="{StaticResource Switch}"
-                                                  Content="Read every document"
-                                                  IsChecked="{Binding AnalyzeAll}"
-                                                  Margin="0,0,0,7" HorizontalAlignment="Left"
-                                                  ToolTip="Off: the schema is inferred from the first 1000 documents of the class. On: every document is read, which is exact and slow." />
-                                        <Button Content="Analyze structure"
-                                                Style="{StaticResource Button.Primary}"
-                                                Command="{Binding AnalyzeCommand}" />
-                                    </StackPanel>
-                                </Border>
+                                <Button DockPanel.Dock="Top" Margin="12,0,12,6" HorizontalAlignment="Left"
+                                        Style="{StaticResource Button.Small}"
+                                        Content="Analyze all classes"
+                                        Command="{Binding AnalyzeAllClassesCommand}"
+                                        Visibility="{Binding IsTwoStep, Converter={StaticResource BoolVis}}"
+                                        ToolTip="Everything for every class: lists the fields of each class not yet listed (fetched by key, no search), ticks every field that never holds an object or an array, and counts them all in one pass on the server. Export then holds the whole collection. Follows the scan-limit switch." />
+
+                                <Button DockPanel.Dock="Top" Margin="12,0,12,6" HorizontalAlignment="Left"
+                                        Style="{StaticResource Button.Small}"
+                                        Content="Count every class exactly"
+                                        Command="{Binding CountExactlyCommand}"
+                                        Visibility="{Binding CanCountExactly, Converter={StaticResource BoolVis}}"
+                                        ToolTip="Counts every class over the whole collection on the server, one batch at a time; only the counts come back. The schema and values stay those of the documents Load read. Classes that none of those documents had appear with a count only." />
+
 
                                 <Grid>
                                     <ListBox Style="{StaticResource EntryList}" AutomationProperties.Name="Classes"
@@ -458,6 +451,28 @@
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <DockPanel ToolTip="{Binding Tip}">
+                                                    <TextBlock DockPanel.Dock="Left" Text="{Binding Glyph}" Margin="0,0,7,0"
+                                                               VerticalAlignment="Center" FontSize="12">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="{x:Type TextBlock}">
+                                                                <Setter Property="Foreground" Value="{DynamicResource Brush.TextTertiary}" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="sampled">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="partly analyzed">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource Brush.Warn}" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="analyzed">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource Brush.Ok}" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="loaded">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource Brush.Ok}" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
                                                     <TextBlock DockPanel.Dock="Right" Margin="8,0,0,0"
                                                                Style="{StaticResource Text.MonoCaption}"
                                                                VerticalAlignment="Center"
@@ -467,17 +482,13 @@
                                                 </DockPanel>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
-                                        <ListBox.InputBindings>
-                                            <MouseBinding MouseAction="LeftDoubleClick"
-                                                          Command="{Binding AnalyzeCommand}" />
-                                        </ListBox.InputBindings>
                                     </ListBox>
 
                                     <StackPanel VerticalAlignment="Center"
                                                 Visibility="{Binding Classes.Count, Converter={StaticResource ZeroVis}}">
                                         <TextBlock Style="{StaticResource Glyph.Placeholder}" Text="&#xE8EC;" />
                                         <TextBlock Style="{StaticResource Text.Placeholder}"
-                                                   Text="Pick a bucket, scope and collection above, then Load classes." />
+                                                   Text="Pick a bucket, scope and collection above, then Load." />
                                     </StackPanel>
                                 </Grid>
                             </DockPanel>
@@ -498,6 +509,26 @@
                                 <DockPanel>
                                     <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
                                         <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0"
+                                                        Visibility="{Binding IsTwoStep, Converter={StaticResource BoolVis}}">
+                                                <TextBlock Text="Select" Style="{StaticResource Text.Secondary}"
+                                                           VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                <Button Content="Scalars" Style="{StaticResource Button.Small}" Margin="0,0,4,0"
+                                                        Command="{Binding SelectScalarFieldsCommand}"
+                                                        ToolTip="Tick every field except objects and arrays (their values are large and rarely worth counting)" />
+                                                <Button Content="All" Style="{StaticResource Button.Small}" Margin="0,0,4,0"
+                                                        Command="{Binding SelectAllFieldsCommand}" />
+                                                <Button Content="None" Style="{StaticResource Button.Small}" Margin="0,0,10,0"
+                                                        Command="{Binding SelectNoFieldsCommand}" />
+                                                <Button Style="{StaticResource Button.Primary}"
+                                                        Command="{Binding AnalyzeSelectedCommand}"
+                                                        ToolTip="Count the ticked fields in every class at once, on the server, in one pass (over the whole collection, or the first N documents while the scan limit is on): exact presence, top 50 values with counts, distinct count, min and max. Only the counts come back. Ticks are by field name, so they carry across classes.">
+                                                    <TextBlock>
+                                                        <Run Text="Analyze selected (" /><Run Text="{Binding SelectedFieldCount, Mode=OneWay}" /><Run Text=")" />
+                                                    </TextBlock>
+                                                </Button>
+                                            </StackPanel>
+
                                             <TextBox DockPanel.Dock="Right" Width="170"
                                                      Style="{StaticResource TextBox.Search}"
                                                      Tag="Filter fields" Margin="8,0,0,0" AutomationProperties.Name="Filter fields"
@@ -552,6 +583,23 @@
                                         <DataGrid AutomationProperties.Name="Fields" ItemsSource="{Binding FieldsView}"
                                                   SelectedItem="{Binding SelectedField}">
                                             <DataGrid.Columns>
+
+                                                <DataGridTemplateColumn Header="" Width="46">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                                <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
+                                                                          VerticalAlignment="Center"
+                                                                          AutomationProperties.Name="Analyze this field"
+                                                                          ToolTip="Tick to count this field over every document of the class" />
+                                                                <TextBlock Text="&#x2713;" Margin="4,0,0,0" VerticalAlignment="Center"
+                                                                           Foreground="{DynamicResource Brush.Ok}"
+                                                                           Visibility="{Binding IsAnalyzed, Converter={StaticResource BoolVis}}"
+                                                                           ToolTip="Counted over every document of the class: presence and values are exact" />
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
 
                                                 <DataGridTemplateColumn Header="Field" Width="2.2*">
                                                     <DataGridTemplateColumn.CellTemplate>
@@ -679,6 +727,19 @@
                                                     </DataGridTemplateColumn.CellTemplate>
                                                 </DataGridTemplateColumn>
 
+
+                                                <DataGridTemplateColumn Header="Values" Width="Auto" MinWidth="96">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <Button Content="Top 50" Style="{StaticResource Button.Small}" Padding="10,2" MinWidth="72"
+                                                                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                                    AutomationProperties.Name="Count this field's values"
+                                                                    Command="{Binding DataContext.AnalyzeFieldCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    ToolTip="Count this field's values in every class (one pass, on the server) and show its top 50 with counts, distinct count, min and max. Follows the scan-limit switch." />
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
                                             </DataGrid.Columns>
                                         </DataGrid>
 
@@ -686,7 +747,7 @@
                                                     Visibility="{Binding FieldCount, Converter={StaticResource ZeroVis}}">
                                             <TextBlock Style="{StaticResource Glyph.Placeholder}" Text="&#xE9D5;" />
                                             <TextBlock Style="{StaticResource Text.Placeholder}"
-                                                       Text="Select a class and run Analyze structure. Every field found in the sample is listed with the types it was seen as and how often it appeared." />
+                                                       Text="Load, then select a class. Every field found in its documents is listed with the types it was seen as and how often it appeared." />
                                         </StackPanel>
                                     </Grid>
                                 </DockPanel>
@@ -695,32 +756,101 @@
                             <GridSplitter Grid.Row="1" Height="10" HorizontalAlignment="Stretch"
                                           VerticalAlignment="Stretch" />
 
-                            <Border Grid.Row="2" Style="{StaticResource Card.Flush}">
-                                <DockPanel>
-                                    <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
-                                        <DockPanel>
-                                            <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small.Icon}"
-                                                    Content="&#xE8C8;" Margin="6,0,0,0"
-                                                    Command="{Binding CopyDistinctValuesCommand}"
-                                                    Visibility="{Binding DistinctValues.Count, Converter={StaticResource PositiveVis}}"
-                                                    ToolTip="Copy every value listed" />
-                                            <TextBlock Text="{Binding DistinctValuesHeader}"
-                                                       Style="{StaticResource Text.Heading}"
-                                                       VerticalAlignment="Center"
-                                                       TextTrimming="CharacterEllipsis" />
-                                        </DockPanel>
-                                    </Border>
+                            <!-- Values of the selected field | sample documents of the selected class -->
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" MinWidth="220" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="1.4*" MinWidth="300" />
+                                </Grid.ColumnDefinitions>
 
-                                    <Grid>
-                                        <ListBox Style="{StaticResource ValueList}" AutomationProperties.Name="Distinct values"
-                                                 ItemsSource="{Binding DistinctValues}" />
+                                <Border Grid.Column="0" Style="{StaticResource Card.Flush}">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small.Icon}"
+                                                        Content="&#xE8C8;" Margin="6,0,0,0"
+                                                        Command="{Binding CopyDistinctValuesCommand}"
+                                                        Visibility="{Binding DistinctValues.Count, Converter={StaticResource PositiveVis}}"
+                                                        ToolTip="Copy every value listed" />
+                                                <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small}"
+                                                        Content="Open example" Margin="6,0,0,0"
+                                                        Command="{Binding OpenValueExampleCommand}"
+                                                        Visibility="{Binding DistinctValues.Count, Converter={StaticResource PositiveVis}}"
+                                                        ToolTip="Open a document that holds the selected value, in the Query tab" />
+                                                <TextBlock Text="{Binding DistinctValuesHeader}"
+                                                           Style="{StaticResource Text.Heading}"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding DistinctValuesHeader}" />
+                                            </DockPanel>
+                                        </Border>
 
-                                        <TextBlock Style="{StaticResource Text.Placeholder}"
-                                                   Visibility="{Binding DistinctValues.Count, Converter={StaticResource ZeroVis}}"
-                                                   Text="Click a field above to see the values it actually holds." />
-                                    </Grid>
-                                </DockPanel>
-                            </Border>
+                                        <Grid>
+                                            <ListBox Style="{StaticResource ValueList}" AutomationProperties.Name="Distinct values"
+                                                     ItemsSource="{Binding DistinctValues}"
+                                                     SelectedItem="{Binding SelectedDistinctValue}"
+                                                     DisplayMemberPath="Text" />
+
+                                            <TextBlock Style="{StaticResource Text.Placeholder}"
+                                                       Visibility="{Binding DistinctValues.Count, Converter={StaticResource ZeroVis}}"
+                                                       Text="Click a field above to see the values it actually holds." />
+                                        </Grid>
+                                    </DockPanel>
+                                </Border>
+
+                                <GridSplitter Grid.Column="1" Width="10" HorizontalAlignment="Stretch"
+                                              VerticalAlignment="Stretch" />
+
+                                <Border Grid.Column="2" Style="{StaticResource Card.Flush}">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small}"
+                                                        Content="Open in Query tab" Margin="6,0,0,0"
+                                                        Command="{Binding OpenSampleInQueryCommand}"
+                                                        ToolTip="Put SELECT … USE KEYS for this document in the Query tab" />
+                                                <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small}"
+                                                        Content="Copy key" Margin="6,0,0,0"
+                                                        Command="{Binding CopySampleKeyCommand}" />
+                                                <TextBlock Text="{Binding SampleDocumentsHeader}"
+                                                           Style="{StaticResource Text.Heading}"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding SampleDocumentsHeader}" />
+                                            </DockPanel>
+                                        </Border>
+
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="2*" MinWidth="140" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="3*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <ListBox Grid.Column="0" Style="{StaticResource ValueList}"
+                                                     AutomationProperties.Name="Sample document keys"
+                                                     ItemsSource="{Binding SampleDocuments}"
+                                                     SelectedItem="{Binding SelectedSampleDocument}"
+                                                     DisplayMemberPath="Display" />
+
+                                            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch"
+                                                          VerticalAlignment="Stretch" />
+
+                                            <TextBox Grid.Column="2" Style="{StaticResource TextBox.Mono}"
+                                                     AutomationProperties.Name="Sample document"
+                                                     IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                                     TextWrapping="NoWrap" VerticalContentAlignment="Top"
+                                                     HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                                                     Text="{Binding SelectedSampleDocument.Json, Mode=OneWay}" />
+
+                                            <TextBlock Grid.ColumnSpan="3" Style="{StaticResource Text.Placeholder}"
+                                                       Visibility="{Binding SampleDocuments.Count, Converter={StaticResource ZeroVis}}"
+                                                       Text="Pick a collection to see its first documents, or a class to see documents from its sample." />
+                                        </Grid>
+                                    </DockPanel>
+                                </Border>
+                            </Grid>
                         </Grid>
                     </Grid>
                 </TabItem>
@@ -905,6 +1035,39 @@
 
             </TabControl>
         </DockPanel>
+
+        <!-- ===================== Loading overlay ======================= -->
+        <!-- While a load runs for more than a moment, the window below the title bar is dimmed and
+             takes no clicks; this card says what is running, how far it is, and offers Cancel. -->
+        <Grid Grid.Row="1" Grid.RowSpan="2" Panel.ZIndex="100"
+              Visibility="{Binding IsActivityVisible, Converter={StaticResource BoolVis}}">
+            <Border Background="{DynamicResource Brush.Window}" Opacity="0.72" />
+            <Border Style="{StaticResource Card}" Width="460" Padding="20,18"
+                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel>
+                    <TextBlock Text="Working…" Style="{StaticResource Text.Heading}" />
+                    <TextBlock Text="{Binding ActivityLine}" Style="{StaticResource Text.Mono}"
+                               TextWrapping="Wrap" Margin="0,8,0,0" />
+
+                    <Grid Margin="0,14,0,0" HorizontalAlignment="Left"
+                          Visibility="{Binding HasActivityPercent, Converter={StaticResource BoolVis}}">
+                        <Border Width="420" Height="6" CornerRadius="3" Background="{DynamicResource Brush.Track}" />
+                        <Border Height="6" CornerRadius="3" HorizontalAlignment="Left"
+                                Background="{DynamicResource Brush.Accent}"
+                                Width="{Binding ActivityPercent, Converter={StaticResource PercentWidth}, ConverterParameter=420}" />
+                    </Grid>
+
+                    <Button Content="Cancel" HorizontalAlignment="Right" Margin="0,16,0,0"
+                            Style="{StaticResource Button.Secondary}"
+                            Command="{Binding CancelActivityCommand}"
+                            Visibility="{Binding IsActivityCancellable, Converter={StaticResource BoolVis}}"
+                            ToolTip="Stop it. A batched read keeps and shows what it counted so far." />
+                    <TextBlock Text="This step cannot be cancelled; it finishes on its own."
+                               Style="{StaticResource Text.Caption}" Margin="0,14,0,0"
+                               Visibility="{Binding IsActivityCancellable, Converter={StaticResource NotBoolVis}}" />
+                </StackPanel>
+            </Border>
+        </Grid>
 
         <!-- ========================= Status bar ======================== -->
         <Border Grid.Row="2" Background="{DynamicResource Brush.Surface}"

@@ -48,6 +48,9 @@ public partial class MainViewModel : ObservableObject
         FieldsView = CollectionViewSource.GetDefaultView(Fields);
         FieldsView.Filter = o => Matches((o as FieldInfo)?.Name, FieldFilter);
 
+        ApplyScanLimitDefaults();
+        _couchbase.GentleMode = _options.GentleMode;
+
         // Select the first saved profile, which populates the connection fields. When none are
         // saved, the fields stay blank and external-network defaults to false.
         if (SavedConnections.Count > 0)
@@ -69,6 +72,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ConnectCommand))]
     [NotifyCanExecuteChangedFor(nameof(SaveConnectionCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CopyConnectionStringCommand))]
     private string _connectionString = "";
 
     [ObservableProperty] private string _username = "";
@@ -90,17 +94,25 @@ public partial class MainViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(ConnectCommand))]
     [NotifyCanExecuteChangedFor(nameof(DisconnectCommand))]
     [NotifyCanExecuteChangedFor(nameof(LoadClassesCommand))]
-    [NotifyCanExecuteChangedFor(nameof(AnalyzeCommand))]
+    [NotifyCanExecuteChangedFor(nameof(DeepLoadCommand))]
     [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CountExactlyCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AnalyzeSelectedCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AnalyzeFieldCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AnalyzeAllClassesCommand))]
     private bool _isBusy;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(DisconnectCommand))]
     [NotifyCanExecuteChangedFor(nameof(LoadClassesCommand))]
-    [NotifyCanExecuteChangedFor(nameof(AnalyzeCommand))]
+    [NotifyCanExecuteChangedFor(nameof(DeepLoadCommand))]
     [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
     [NotifyCanExecuteChangedFor(nameof(SyncFromSelectionCommand))]
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AnalyzeSelectedCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AnalyzeFieldCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AnalyzeAllClassesCommand))]
     private bool _isConnected;
 
     [ObservableProperty] private string _status = "Not connected.";
@@ -125,7 +137,76 @@ public partial class MainViewModel : ObservableObject
     public ObservableCollection<ClassEntry> Classes { get; } = new();
     public ObservableCollection<FieldInfo> Fields { get; } = new();
     public ObservableCollection<FieldInfo> QueryFields { get; } = new();
-    public ObservableCollection<string> DistinctValues { get; } = new();
+    public ObservableCollection<DistinctValueItem> DistinctValues { get; } = new();
+
+    /// <summary>The documents of the selected class's sample (or a Deep load's oldest/newest).</summary>
+    public ObservableCollection<SampleDocumentItem> SampleDocuments { get; } = new();
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(OpenValueExampleCommand))]
+    private DistinctValueItem? _selectedDistinctValue;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CopySampleKeyCommand))]
+    [NotifyCanExecuteChangedFor(nameof(OpenSampleInQueryCommand))]
+    private SampleDocumentItem? _selectedSampleDocument;
+
+    [ObservableProperty] private string _sampleDocumentsHeader = "Sample documents";
+
+    /// <summary>The collection's first documents by key, shown in the documents pane while no class
+    /// is selected.</summary>
+    private IReadOnlyList<SampleDocumentItem> _collectionPreview = [];
+
+    public const int PreviewSize = 10;
+
+    private CancellationTokenSource? _previewCts;
+
+    private async Task LoadCollectionPreviewAsync()
+    {
+        _previewCts?.Cancel();
+        _previewCts?.Dispose();
+        var cts = _previewCts = new CancellationTokenSource();
+        _collectionPreview = [];
+        ShowCollectionPreview();
+        if (!IsConnected || SelectedBucket is null || SelectedScope is null || SelectedCollection is null) return;
+
+        var collection = SelectedCollection;
+        try
+        {
+            SampleDocumentsHeader = $"Loading the first {PreviewSize} documents of '{collection}'…";
+            var docs = await _couchbase.GetFirstDocumentsAsync(SelectedBucket, SelectedScope.Name, collection, PreviewSize, cts.Token);
+            if (cts.IsCancellationRequested) return;
+            _collectionPreview = docs.Select(d => new SampleDocumentItem(
+                d.Key, d.Document.ValueKind == JsonValueKind.Undefined ? "(not JSON)" : PrettyJson(JsonNode.Parse(d.Document.GetRawText())))).ToList();
+            ShowCollectionPreview();
+        }
+        catch (Exception ex)
+        {
+            if (!cts.IsCancellationRequested)
+                SampleDocumentsHeader = $"Could not load the first documents: {ExceptionReport.Summarize(ex)}";
+        }
+    }
+
+    /// <summary>Shows the collection preview in the documents pane, unless a class is on screen.</summary>
+    private void ShowCollectionPreview()
+    {
+        if (!string.IsNullOrEmpty(AnalyzedClass)) return;
+        SampleDocuments.Clear();
+        foreach (var d in _collectionPreview) SampleDocuments.Add(d);
+        SampleDocumentsHeader = _collectionPreview.Count == 0
+            ? "Sample documents"
+            : $"First {_collectionPreview.Count} documents of '{SelectedCollection}' (by key)";
+        SelectedSampleDocument = SampleDocuments.FirstOrDefault();
+    }
+
+    private static string PrettyJson(JsonNode? doc) => doc?.ToJsonString(new JsonSerializerOptions
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    }) ?? "";
+
+    /// <summary>The window's tab: 0 Schema explorer, 1 Query.</summary>
+    [ObservableProperty] private int _selectedTabIndex;
 
     /// <summary>The filtered views the window binds to. Same underlying collections as above.</summary>
     public ICollectionView ClassesView { get; }
@@ -151,26 +232,31 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(LoadClassesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(DeepLoadCommand))]
     [NotifyCanExecuteChangedFor(nameof(SyncFromSelectionCommand))]
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
     private string? _selectedCollection;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(LoadClassesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(DeepLoadCommand))]
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
     private string _discriminator = "class";
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(AnalyzeCommand))]
     private string? _selectedClass;
 
     /// <summary>The row selected in the class list; <see cref="SelectedClass"/> is its name.</summary>
     [ObservableProperty] private ClassEntry? _selectedClassEntry;
 
+    // Everything a class shows was gathered by Load: selecting one reads nothing.
     partial void OnSelectedClassEntryChanged(ClassEntry? value)
     {
         SelectedClass = value?.Name;
-        if (IsOffline && value is not null) ShowOfflineSchema(value.Name);
+        if (value is null) { ClearSchema(); return; }
+        ShowClassSchema(value.Name);
+        if (_twoStep is not null && !_twoStep.Samples.ContainsKey(value.Name))
+            _ = SampleClassAsync(value.Name);
     }
 
     /// <summary>What the class percentages are of: documents read, and how many had no class.</summary>
@@ -178,57 +264,84 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private FieldInfo? _selectedField;
     [ObservableProperty] private string _distinctValuesHeader = "Distinct values";
-    [ObservableProperty] private bool _analyzeAll;
 
     // ---- Scan limit ----
-    // How many documents Load classes, Analyze and distinct values read: the collection's first N
-    // in primary-key order. On a collection with only a primary index, an unbounded query fetches
-    // every document to test its WHERE, and a schema does not need all of them.
+    // How many documents Load reads: the collection's first N in primary-key order, or all of them.
+    // A schema rarely needs every document, and reading fewer is what keeps Load quick.
 
-    public const int DefaultScanLimit = 50_000;
-
-    /// <summary>Documents to read per query; empty or 0 means the whole collection.</summary>
+    /// <summary>On: Load reads the first <see cref="ScanLimit"/> documents. Off: the whole collection.
+    /// Starts from Options; the switch beside Load changes it for the session.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ScanLimitSummary))]
-    private string _scanLimit = DefaultScanLimit.ToString(CultureInfo.InvariantCulture);
+    private bool _isScanLimitOn = true;
 
-    public string ScanLimitSummary => TryScanLimit(out var n)
-        ? n is null
-            ? "documents: the whole collection is read"
-            : $"documents read per query (first {n:N0} by key; 0 or empty = whole collection)"
-        : "is not a whole number";
+    /// <summary>Documents Load reads while the scan limit is on.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ScanLimitSummary))]
+    private string _scanLimit = AppOptions.DefaultScanLimitValue.ToString("N0", CultureInfo.InvariantCulture);
+
+    public string ScanLimitSummary => !IsScanLimitOn
+        ? "off: Deep load and Analyze read the whole collection"
+        : TryScanLimit(out var n) && n is not null
+            ? $"documents: Deep load and Analyze read the first {n:N0} by key"
+            : "must be a whole number above 0 (or switch the limit off)";
 
     private static bool TryParseScanLimit(string text, out int? limit)
     {
         limit = null;
-        if (string.IsNullOrWhiteSpace(text)) return true;
         if (!int.TryParse(text.Replace(",", "").Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ||
-            n < 0)
+            n <= 0)
             return false;
-        limit = n == 0 ? null : n;
+        limit = n;
         return true;
     }
 
-    private bool TryScanLimit(out int? limit) => TryParseScanLimit(ScanLimit, out limit);
+    /// <summary>The limit in force: null (whole collection) when the switch is off.</summary>
+    private bool TryScanLimit(out int? limit)
+    {
+        limit = null;
+        return !IsScanLimitOn || TryParseScanLimit(ScanLimit, out limit);
+    }
+
+    /// <summary>The switch is remembered: flipping it is saved to options.json at once, so the next
+    /// session starts the way this one was left.</summary>
+    partial void OnIsScanLimitOnChanged(bool value)
+    {
+        if (_options.ScanLimitEnabled == value) return;   // set from Options, nothing new to save
+        _options.ScanLimitEnabled = value;
+        try
+        {
+            _options.Save();
+        }
+        catch (Exception ex)
+        {
+            Report($"Could not remember the scan limit switch: {ex.Message}", StatusKind.Error);
+        }
+    }
+
+    /// <summary>Puts the scan-limit switch and number back to what Options says.</summary>
+    private void ApplyScanLimitDefaults()
+    {
+        IsScanLimitOn = _options.ScanLimitEnabled;
+        ScanLimit = _options.ScanLimit.ToString("N0", CultureInfo.InvariantCulture);
+    }
 
     /// <summary>The limit to send, or null for the whole collection. Throws on text that does not
     /// parse, so a typo is reported instead of silently reading everything.</summary>
     private int? ScanLimitValue() =>
         TryScanLimit(out var n)
             ? n
-            : throw new FormatException($"Scan limit: '{ScanLimit}' is not a whole number.");
+            : throw new FormatException($"Scan limit: '{ScanLimit}' is not a whole number above 0. Fix it, or switch the limit off.");
 
     private int? ScanLimitValueOrNull() => TryScanLimit(out var n) ? n : null;
 
     private static string Scanned(int? scanLimit) =>
         scanLimit is null ? "" : $" in the first {scanLimit:N0} documents";
 
-    // ---- Whole-collection export ----
-    // Reads every document of the collection in key-ordered batches and writes one JSON summary:
-    // classes with counts and %, each class's min/max date, and each field's types, presence,
-    // requirement, flags and distinct values. After each batch the running summary is saved, so an
-    // export that stops for any reason resumes from the last finished batch.
+    // ---- Date field ----
 
+    /// <summary>The field whose first/last value Load reports per class (when its documents were
+    /// created). Guessed when a collection is picked: createdts, createdAt, created_at, …</summary>
     [ObservableProperty] private string _exportDateField = "createdts";
 
     // ---- Collection summary ----
@@ -278,7 +391,12 @@ public partial class MainViewModel : ObservableObject
         {
             window.Options.Save();
             _options = window.Options;
-            Report($"Options saved: whole-collection reads go in batches of {_options.BatchSize:N0} documents.",
+            ApplyScanLimitDefaults();
+            _couchbase.GentleMode = _options.GentleMode;
+            Report($"Options saved: batches of {_options.BatchSize:N0} documents, " +
+                   (_options.GentleMode ? "gentle mode on (one at a time, paused); " : $"{_options.ParallelReads} at once; ") +
+                   "scan limit " +
+                   (_options.ScanLimitEnabled ? $"on, {_options.ScanLimit:N0}." : "off (whole collection)."),
                    StatusKind.Ok);
         }
         catch (Exception ex)
@@ -300,6 +418,13 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>The live activity line: what is running, its progress, and the elapsed time.</summary>
     [ObservableProperty] private string _activityLine = "";
+
+    /// <summary>How far a batched read is, 0–100; null when unknown (a single query).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasActivityPercent))]
+    private double? _activityPercent;
+
+    public bool HasActivityPercent => ActivityPercent is not null;
 
     /// <summary>Whether the running operation stops on Cancel (Load classes, Analyze).</summary>
     [ObservableProperty]
@@ -333,134 +458,19 @@ public partial class MainViewModel : ObservableObject
         Report(line, StatusKind.Busy);
     }
 
-    /// <summary>
-    /// Walks the collection batch by batch: finds where each batch ends (keys only), hands the
-    /// range to <paramref name="readBatch"/>, and reports progress before and after each one.
-    /// <paramref name="readBatch"/> returns a short tail for the progress line ("· 12 classes so far").
-    /// </summary>
-    private async Task RunBatchesAsync(
-        string bucket, string scope, string collection, string label,
-        Func<string, string?, Task<string>> readBatch, CancellationToken ct)
-    {
-        var total = await _couchbase.CountDocumentsAsync(bucket, scope, collection);
-        var size = _options.BatchSize;
-        var batches = Math.Max(1, (int)Math.Ceiling(total / (double)size));
-        var clock = Stopwatch.StartNew();
-        var after = "";
-        var tail = "";
+    // ---- Load ----
+    // One pass over the scan limit (or the whole collection) gathers everything the explorer
+    // shows: per class its count, %, first/last date, and per field its types, presence, flags and
+    // most frequent values. Selecting a class or a field afterwards reads nothing, and Export saves
+    // the same summary. Documents come in key-ordered pages of the Options batch size; after each
+    // page the running summary is saved, so a long load that is cancelled or fails can resume.
 
-        for (var n = 1; ; n++)
-        {
-            ct.ThrowIfCancellationRequested();
-            ShowBatchProgress(label, Math.Min(total, (long)(n - 1) * size), total, n, batches, clock.Elapsed, tail);
-
-            var end = await _couchbase.GetBatchEndKeyAsync(bucket, scope, collection, after, size, ct);
-            tail = await readBatch(after, end);
-            if (end is null) break;
-            after = end;
-        }
-
-        ShowBatchProgress(label, total, total, batches, batches, clock.Elapsed, tail);
-    }
-
-    private void ShowBatchProgress(
-        string label, long done, long total, int batch, int batches, TimeSpan elapsed, string tail)
-    {
-        var percent = total == 0 ? 100 : done * 100.0 / total;
-        var rate = elapsed.TotalSeconds >= 1 ? done / elapsed.TotalSeconds : 0;
-        var text = $"{label}: {done:N0} / {total:N0} documents ({percent:0}%) · batch {batch} of {batches}";
-        if (rate > 0) text += $" · {rate:N0} docs/s";
-        if (rate > 0 && done < total)
-        {
-            var left = TimeSpan.FromSeconds((total - done) / rate);
-            text += left.TotalHours >= 1
-                ? $" · ~{(int)left.TotalHours}h {left.Minutes}m left"
-                : $" · ~{Math.Max(1, (int)Math.Ceiling(left.TotalMinutes))} min left";
-        }
-        SetActivity(text + tail);
-    }
-
-    /// <summary>Class counts over the whole collection, batch by batch; the class list shows the
-    /// running counts after each batch. On Cancel, returns the counts so far.</summary>
-    private async Task<(ClassCounts Counts, bool Cancelled)> CountClassesInBatchesAsync(
-        string bucket, string scope, string collection, string discriminator, CancellationToken ct)
-    {
-        var totals = new Dictionary<string, long>(StringComparer.Ordinal);
-        long withoutClass = 0;
-
-        ClassCounts Snapshot()
-        {
-            var read = totals.Values.Sum() + withoutClass;
-            var entries = totals
-                .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(kv => new ClassEntry(kv.Key, kv.Value, read == 0 ? 0 : kv.Value * 100.0 / read))
-                .ToList();
-            return new ClassCounts(entries, read, withoutClass);
-        }
-
-        try
-        {
-            await RunBatchesAsync(bucket, scope, collection, "Loading classes", async (after, end) =>
-            {
-                var rows = await _couchbase.CountClassesInRangeAsync(
-                    bucket, scope, collection, discriminator, after, end, ct);
-                foreach (var (cls, n) in rows)
-                {
-                    if (cls is null) withoutClass += n;
-                    else totals[cls] = totals.GetValueOrDefault(cls) + n;
-                }
-
-                var snapshot = Snapshot();
-                Classes.Clear();
-                foreach (var c in snapshot.Classes) Classes.Add(c);
-                return $" · {totals.Count} class(es) so far";
-            }, ct);
-            return (Snapshot(), false);
-        }
-        catch (Exception) when (ct.IsCancellationRequested)
-        {
-            return (Snapshot(), true);
-        }
-    }
-
-    /// <summary>Every document of one class, batch by batch. On Cancel, returns the schema of the
-    /// documents read so far.</summary>
-    private async Task<(ClassSchema Schema, bool Cancelled)> AnalyzeInBatchesAsync(
-        string bucket, string scope, string collection, string discriminator, string className,
-        CancellationToken ct)
-    {
-        var analyzer = new SchemaAnalyzer();
-        try
-        {
-            await RunBatchesAsync(bucket, scope, collection, $"Analyzing '{className}'", async (after, end) =>
-            {
-                // Off the UI thread: a batch can hold a million documents to walk.
-                await Task.Run(async () =>
-                {
-                    await foreach (var doc in _couchbase.ReadClassInRangeAsync(
-                                       bucket, scope, collection, discriminator, className, after, end, ct))
-                        analyzer.Add(doc);
-                }, ct);
-                return $" · {analyzer.SampleSize:N0} '{className}' document(s) so far";
-            }, ct);
-            return (analyzer.Build(className), false);
-        }
-        catch (Exception) when (ct.IsCancellationRequested)
-        {
-            return (analyzer.Build(className), true);
-        }
-    }
-
-    // ---- Export (continued) ----
+    /// <summary>The summary of the last Load, for Export. Null when nothing is loaded or a file is shown.</summary>
+    private ExportState? _loaded;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
-    [NotifyCanExecuteChangedFor(nameof(CancelExportCommand))]
-    private bool _isExporting;
-
-    [ObservableProperty] private string _exportProgress = "";
-
-    private CancellationTokenSource? _exportCts;
+    private bool _hasLoaded;
 
     /// <summary>Creation-date names seen across the Sekeh collections, in order of preference.</summary>
     private static readonly string[] DateFieldNames =
@@ -481,205 +491,755 @@ public partial class MainViewModel : ObservableObject
         return null;
     }
 
-    [RelayCommand(CanExecute = nameof(CanExport))]
-    private async Task ExportAsync()
+    [RelayCommand(CanExecute = nameof(CanLoadClasses))]
+    private async Task DeepLoadAsync()
     {
-        var batchSize = _options.BatchSize;
+        int? scan;
+        try { scan = ScanLimitValue(); }
+        catch (FormatException ex) { Report(ex.Message, StatusKind.Error); return; }
 
         var bucket = SelectedBucket!;
         var scope = SelectedScope!.Name;
         var collection = SelectedCollection!;
         var discriminator = Discriminator.Trim();
-        var checkpointPath = ExportState.CheckpointPath(bucket, scope, collection, discriminator);
+        var coverage = scan is null ? "the whole collection" : $"the first {scan:N0} documents";
+        var checkpointPath = ExportState.CheckpointPath(bucket, scope, collection, discriminator, scan);
 
-        var checkpoint = ExportState.Load(checkpointPath);
-
-        var defaultPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-            $"{collection}-{discriminator}-{DateTime.Now:yyyyMMdd-HHmm}.json");
-        var dialog = new ExportWindow(
-            $"{bucket}.{scope}.{collection} · classes by '{discriminator}'" +
-            (CollectionSummary.Length > 0 ? $" · {CollectionSummary}" : ""),
-            DiscriminatorFields, ExportDateField, defaultPath, batchSize, checkpoint)
+        var state = ExportState.Load(checkpointPath);
+        if (state is not null)
         {
-            Owner = System.Windows.Application.Current?.MainWindow
+            var answer = System.Windows.MessageBox.Show(
+                $"A load of '{collection}' ({coverage}, classes by '{discriminator}') stopped after " +
+                $"{state.DocumentsRead:N0} documents; its progress was saved " +
+                $"{state.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm}.\n\nResume it? No starts over.",
+                "Resume load?", System.Windows.MessageBoxButton.YesNoCancel,
+                System.Windows.MessageBoxImage.Question);
+            if (answer == System.Windows.MessageBoxResult.Cancel) return;
+            if (answer == System.Windows.MessageBoxResult.No) state = null;
+        }
+
+        state ??= new ExportState
+        {
+            Bucket = bucket,
+            Scope = scope,
+            Collection = collection,
+            Discriminator = discriminator,
+            DateField = ExportDateField.Trim(),
+            BatchSize = _options.BatchSize,
+            ParallelReads = _options.EffectiveParallelReads,
+            MaxDocuments = scan,
+            StartedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
         };
-        if (dialog.ShowDialog() != true) return;
 
-        ExportState state;
-        if (dialog.Resume)
+        state.ParallelReads = _options.EffectiveParallelReads;
+        state.PauseBetweenPages = _options.EffectivePause;
+        ClearLoaded();
+        await RunGuarded($"Loading '{collection}'…", async ct =>
         {
-            state = checkpoint!;
-        }
-        else
-        {
-            state = new ExportState
+            var count = await _couchbase.CountDocumentsAsync(bucket, scope, collection, ct);
+            var total = scan is { } m ? Math.Min(count, m) : count;
+            var resumedAt = state.DocumentsRead;
+            var clock = Stopwatch.StartNew();
+            IProgress<(string Text, double Percent)> progress = new Progress<(string Text, double Percent)>(p =>
             {
-                Bucket = bucket,
-                Scope = scope,
-                Collection = collection,
-                Discriminator = discriminator,
-                DateField = dialog.DateField,
-                BatchSize = batchSize,
-                OutputPath = dialog.OutputPath,
-                StartedAt = DateTimeOffset.UtcNow,
-                UpdatedAt = DateTimeOffset.UtcNow
-            };
-            state.Save(checkpointPath);
-        }
+                ActivityPercent = p.Percent;
+                SetActivity(p.Text);
+            });
 
-        _exportCts = new CancellationTokenSource();
-        var ct = _exportCts.Token;
-        IsExporting = true;
-        Report($"Exporting '{collection}' to {state.OutputPath}…", StatusKind.Busy);
-        ExportProgress = "Counting documents…";
-        var progress = new Progress<string>(text => ExportProgress = text);
+            var cancelled = false;
+            try
+            {
+                // Off the UI thread: a page can hold a million documents to walk. The progress text
+                // is built on the reading thread, the only one touching the summary while it grows.
+                await Task.Run(() => state.ReadAllAsync(_couchbase, checkpointPath,
+                    () => progress.Report(LoadProgress(state, collection, total,
+                                                       state.DocumentsRead - resumedAt, clock.Elapsed)),
+                    ct), ct);
+                TryDelete(checkpointPath);
+            }
+            catch (Exception) when (ct.IsCancellationRequested)
+            {
+                cancelled = true;
+            }
+
+            var countNow = await _couchbase.CountDocumentsAsync(bucket, scope, collection);
+            _report = state.BuildReport(countNow);
+            _loaded = state;
+            HasLoaded = true;
+            ShowReport(_report);
+            CanCountExactly = state.DocumentsRead < countNow;
+
+            var expected = scan is { } cap ? Math.Min(countNow, cap) : countNow;
+            var check = cancelled ? ""
+                : state.DocumentsRead == expected ? " · ✓ matches the collection count"
+                : $" · ⚠ expected {expected:N0} (documents were added or removed during the read)";
+            ClassesCaption = cancelled
+                ? $"Cancelled: % of the first {state.DocumentsRead:N0} documents only"
+                : $"% of {state.DocumentsRead:N0} documents ({coverage}){check}";
+
+            Report(cancelled
+                    ? $"Load cancelled after {state.DocumentsRead:N0} documents; what is shown covers those. " +
+                      "Load again to resume."
+                    : $"Loaded {Classes.Count} class(es) from {state.DocumentsRead:N0} documents. " +
+                      "Select a class to see its schema.",
+                cancelled ? StatusKind.Idle : StatusKind.Ok);
+        }, cancellable: true);
+    }
+
+    private bool CanLoadClasses() =>
+        IsConnected && !IsBusy &&
+        SelectedScope is not null &&
+        !string.IsNullOrWhiteSpace(SelectedCollection) &&
+        !string.IsNullOrWhiteSpace(Discriminator);
+
+    private static (string Text, double Percent) LoadProgress(
+        ExportState state, string collection, long total, long readThisRun, TimeSpan elapsed)
+    {
+        var done = state.DocumentsRead;
+        var percent = total == 0 ? 100 : Math.Min(100, done * 100.0 / total);
+        var batches = Math.Max(1, (int)Math.Ceiling(total / (double)state.BatchSize));
+        var batch = Math.Min(batches, state.BatchesDone + 1);
+        var rate = elapsed.TotalSeconds >= 1 ? readThisRun / elapsed.TotalSeconds : 0;
+
+        var text = $"Reading '{collection}': {done:N0} / {total:N0} documents ({percent:0}%) · " +
+                   $"batch {batch} of {batches}";
+        if (rate > 0) text += $" · {rate:N0} docs/s";
+        if (rate > 0 && done < total)
+        {
+            var left = TimeSpan.FromSeconds((total - done) / rate);
+            text += left.TotalHours >= 1
+                ? $" · ~{(int)left.TotalHours}h {left.Minutes}m left"
+                : $" · ~{Math.Max(1, (int)Math.Ceiling(left.TotalMinutes))} min left";
+        }
+        text += $" · {state.Classes.Count} class(es)";
+
+        // Where the time goes: the page's wait for its first row is the server preparing it; the
+        // rest is the server fetching and sending rows, or this app summarising them.
+        var reading = state.ReadingTime.TotalSeconds;
+        if (reading >= 2)
+        {
+            var appShare = state.ProcessingTime.TotalSeconds / reading * 100;
+            var perDoc = readThisRun > 0 ? state.BytesRead / (double)readThisRun / 1024 : 0;
+            var mbps = state.BytesRead / reading / (1024 * 1024);
+            text += $"\nfirst row of this batch after {state.LastFirstRowWait.TotalSeconds:0.0} s · " +
+                    $"app busy {appShare:0}%, waiting on the server/network {100 - appShare:0}% · " +
+                    $"{state.RangesActive} range(s) streaming · ≈{perDoc:0.0} KB/doc · ≈{mbps:0.00} MB/s";
+        }
+        return (text, percent);
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); }
+        catch (Exception) { /* a stale checkpoint only means a resume offer next time */ }
+    }
+
+    // ---- Two-step analysis ----
+    // Step 1, Load: every class with its exact count, counted on the server over the whole
+    // collection; no document is downloaded. Opening a class then downloads a small sample of it to
+    // list its fields. Step 2, Analyze selected: the ticked fields are counted on the server over
+    // every document of the class in one pass, and only the counts come back. Deep load (above) is
+    // the other way: download documents and summarise everything in the app.
+
+    private TwoStepState? _twoStep;
+
+    /// <summary>Ticked field names. One list for every class: Analyze counts these fields in all
+    /// classes at once, so a tick holds whichever class is on screen.</summary>
+    private readonly HashSet<string> _tickedFields = new(StringComparer.Ordinal);
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(AnalyzeSelectedCommand))]
+    private int _selectedFieldCount;
+
+    /// <summary>True when the explorer shows a two-step summary, so the tick boxes do something.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(AnalyzeSelectedCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AnalyzeFieldCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AnalyzeAllClassesCommand))]
+    private bool _isTwoStep;
+
+    /// <summary>The legend under the class list for a two-step summary.</summary>
+    private const string StatusLegend = "○ counted · ◐ fields listed · ◑ partly analyzed · ● analyzed";
+
+    [RelayCommand(CanExecute = nameof(CanLoadClasses))]
+    private async Task LoadClassesAsync()
+    {
+        var bucket = SelectedBucket!;
+        var scope = SelectedScope!.Name;
+        var collection = SelectedCollection!;
+        var discriminator = Discriminator.Trim();
+
+        ClearLoaded();
+        await RunGuarded($"Counting the classes of '{collection}'…", async ct =>
+        {
+            Dictionary<string, long> counts;
+            var keys = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            try
+            {
+                counts = await CountAllClassesAsync(bucket, scope, collection, discriminator, "Counting classes", ct, keys);
+            }
+            catch (Exception) when (ct.IsCancellationRequested)
+            {
+                Report("Load cancelled.", StatusKind.Idle);
+                return;
+            }
+
+            var state = new TwoStepState
+            {
+                Bucket = bucket, Scope = scope, Collection = collection, Discriminator = discriminator
+            };
+            foreach (var (k, v) in counts) state.Counts[k] = v;
+            foreach (var (k, v) in keys) state.SampleKeys[k] = v;
+            state.Total = counts.Values.Sum();
+            state.CountedAt = DateTimeOffset.UtcNow;
+
+            _twoStep = state;
+            IsTwoStep = true;
+
+            // Every class's sample right away, fetched by the keys just collected (a direct lookup,
+            // no search), so selecting a class shows its fields at once. Cancel keeps the counts and
+            // the samples taken so far; a class without one is sampled when it is selected.
+            var ordered = counts.OrderByDescending(c => c.Value).Select(c => c.Key).ToList();
+            var sampled = 0;
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                ActivityPercent = i * 100.0 / ordered.Count;
+                SetActivity($"Listing fields from a sample of each class: {i + 1} of {ordered.Count} ('{ordered[i]}')");
+                try
+                {
+                    await SampleClassCoreAsync(ordered[i], ct);
+                    sampled++;
+                }
+                catch (Exception) when (ct.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+
+            _report = state.BuildReport();
+            HasLoaded = true;
+            ShowReport(_report);
+            ClassesCaption = $"% of all {state.Total:N0} documents (exact) · {StatusLegend}";
+            Report(sampled == ordered.Count
+                    ? $"Counted {counts.Count} class(es) over {state.Total:N0} documents and listed their fields. " +
+                      "Tick fields and Analyze selected, or press Analyze all classes for everything."
+                    : $"Counted {counts.Count} class(es); fields listed for {sampled} before Cancel. The others " +
+                      "are listed when selected.",
+                sampled == ordered.Count ? StatusKind.Ok : StatusKind.Idle);
+        }, cancellable: true);
+    }
+
+    /// <summary>
+    /// Every class's document count over the whole collection, counted on the server range by range
+    /// (several ranges at once): only one row per class comes back per range. With
+    /// <paramref name="sampleKeys"/>, also up to <see cref="TwoStepState.SampleSize"/> keys per class.
+    /// </summary>
+    private async Task<Dictionary<string, long>> CountAllClassesAsync(
+        string bucket, string scope, string collection, string discriminator, string label, CancellationToken ct,
+        Dictionary<string, List<string>>? sampleKeys = null)
+    {
+        var count = await _couchbase.CountDocumentsAsync(bucket, scope, collection, ct);
+        var totals = new Dictionary<string, long>(StringComparer.Ordinal);
+        var sync = new object();
+        var clock = Stopwatch.StartNew();
+        IProgress<(int Done, int Expected)> progress = new Progress<(int Done, int Expected)>(p =>
+        {
+            long docs; int classes;
+            lock (sync) { docs = totals.Values.Sum(); classes = totals.Count; }
+            ActivityPercent = Math.Min(100, p.Done * 100.0 / p.Expected);
+            var rate = clock.Elapsed.TotalSeconds >= 1 ? docs / clock.Elapsed.TotalSeconds : 0;
+            SetActivity($"{label}: batch {p.Done} of ~{p.Expected} ({ActivityPercent:0}%) · {docs:N0} of " +
+                        $"{count:N0} documents counted · {classes} class(es)" + (rate > 0 ? $" · {rate:N0} docs/s" : ""));
+        });
+        SetActivity($"{label}: {count:N0} documents, starting…");
+
+        await RangePlanner.RunAsync(
+            count, cap: null, _options.BatchSize, _options.EffectiveParallelReads,
+            (after, n) => _couchbase.GetBatchEndKeyAsync(bucket, scope, collection, after, n, ct),
+            async (after, end) =>
+            {
+                var rows = await _couchbase.CountClassesInRangeAsync(
+                    bucket, scope, collection, discriminator, after, end,
+                    sampleKeys is null ? 0 : TwoStepState.KeysPerRange, ct);
+                lock (sync)
+                    foreach (var (cls, n, keys) in rows)
+                    {
+                        var key = cls ?? ExportState.NoClass;
+                        totals[key] = totals.GetValueOrDefault(key) + n;
+                        if (sampleKeys is null) continue;
+                        if (!sampleKeys.TryGetValue(key, out var list)) sampleKeys[key] = list = new List<string>();
+                        foreach (var k in keys)
+                            if (list.Count < TwoStepState.SampleSize) list.Add(k);
+                    }
+            },
+            (done, expected) => progress.Report((done, expected)),
+            ct,
+            _options.EffectivePause);
+
+        return totals;
+    }
+
+    /// <summary>Lists a class's fields from a sample (once per class), then shows them.</summary>
+    private async Task SampleClassAsync(string className)
+    {
+        await RunGuarded($"Listing the fields of '{className}'…", async ct =>
+        {
+            try
+            {
+                await SampleClassCoreAsync(className, ct);
+            }
+            catch (Exception) when (ct.IsCancellationRequested)
+            {
+                Report("Sampling cancelled.", StatusKind.Idle);
+                return;
+            }
+
+            RefreshTwoStepReport();
+            if (SelectedClass == className) ShowClassSchema(className);
+            var sample = _twoStep!.Samples[className];
+            Report($"'{className}': {sample.Size:N0} document(s) sampled, {sample.Fields.Count} field(s). " +
+                   "Tick fields (or use Scalars) and Analyze selected.", StatusKind.Ok);
+        }, cancellable: true);
+    }
+
+    /// <summary>The sample itself: fetched by the keys Load kept (no search), or, when there are
+    /// none, the first documents of the class the server finds.</summary>
+    private async Task SampleClassCoreAsync(string className, CancellationToken ct)
+    {
+        var state = _twoStep!;
+        var docs = state.SampleKeys.TryGetValue(className, out var keys) && keys.Count > 0
+            ? await _couchbase.GetDocumentsByKeysAsync(state.Bucket, state.Scope, state.Collection, keys, ct)
+            : await _couchbase.GetClassSampleAsync(
+                state.Bucket, state.Scope, state.Collection, state.Discriminator,
+                className == ExportState.NoClass ? null : className, TwoStepState.SampleSize, ct);
+
+        var analyzer = new SchemaAnalyzer();
+        foreach (var (_, d) in docs) analyzer.Add(d);
+        state.Samples[className] = new TwoStepState.ClassSample
+        {
+            Size = docs.Count,
+            Fields = analyzer.Build(className).Fields,
+            At = DateTimeOffset.UtcNow,
+            Documents = docs.Take(TwoStepState.DocumentsKept)
+                            .Where(d => d.Document.ValueKind != JsonValueKind.Undefined)
+                            .Select(d => (d.Key, d.Document.GetRawText()))
+                            .ToList()
+        };
+        // Found by searching (no keys from Load): its keys still give the key shapes.
+        if (!state.SampleKeys.ContainsKey(className))
+            state.SampleKeys[className] = docs.Select(d => d.Key).ToList();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanAnalyzeSelected))]
+    private Task AnalyzeSelectedAsync() => AnalyzeFieldsAsync(_tickedFields.Order(StringComparer.Ordinal).ToList());
+
+    private bool CanAnalyzeSelected() => IsTwoStep && IsConnected && !IsBusy && SelectedFieldCount > 0;
+
+    /// <summary>The button on a field's row: that one field, in every class, then its values.</summary>
+    [RelayCommand(CanExecute = nameof(CanAnalyzeField))]
+    private async Task AnalyzeFieldAsync(FieldInfo? field)
+    {
+        if (field is null) return;
+        var name = field.Name;
+        await AnalyzeFieldsAsync([name]);
+        SelectedField = Fields.FirstOrDefault(f => f.Name == name);
+    }
+
+    private bool CanAnalyzeField(FieldInfo? field) => IsTwoStep && IsConnected && !IsBusy;
+
+    /// <summary>
+    /// Everything for every class: lists the fields of each class not yet sampled (by key, from the
+    /// keys Load kept), ticks every field that never holds an object or an array, and counts them all
+    /// in one pass. Export then holds the whole collection.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanAnalyzeAll))]
+    private async Task AnalyzeAllClassesAsync()
+    {
+        int? scan;
+        try { scan = ScanLimitValue(); }
+        catch (FormatException ex) { Report(ex.Message, StatusKind.Error); return; }
+        var state = _twoStep!;
+
+        await RunGuarded("Analyzing every class…", async ct =>
+        {
+            var toSample = state.Counts.Keys.Where(k => !state.Samples.ContainsKey(k))
+                                .OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+            for (var i = 0; i < toSample.Count; i++)
+            {
+                ActivityPercent = i * 100.0 / toSample.Count;
+                SetActivity($"Listing fields: class {i + 1} of {toSample.Count} ('{toSample[i]}')");
+                try
+                {
+                    await SampleClassCoreAsync(toSample[i], ct);
+                }
+                catch (Exception) when (ct.IsCancellationRequested)
+                {
+                    RefreshTwoStepReport();
+                    Report("Analyze all classes cancelled while listing fields; the classes listed so far keep " +
+                           "their fields.", StatusKind.Idle);
+                    return;
+                }
+            }
+            RefreshTwoStepReport();
+
+            // A field that is an object or an array in any class is left out: its values are large
+            // and rarely worth counting. Its own scalar members (e.g. linkedCard.provider) stay in.
+            var fields = state.Samples.Values.SelectMany(sm => sm.Fields)
+                .GroupBy(f => f.Name, StringComparer.Ordinal)
+                .Where(g => g.All(f => f.IsScalar))
+                .Select(g => g.Key)
+                .Order(StringComparer.Ordinal)
+                .ToList();
+            foreach (var f in fields) _tickedFields.Add(f);
+            SelectedFieldCount = _tickedFields.Count;
+            foreach (var f in Fields) f.IsSelected = _tickedFields.Contains(f.Name);
+
+            if (fields.Count == 0)
+            {
+                Report("No field with plain values was found in the samples.", StatusKind.Idle);
+                return;
+            }
+
+            var summary = await AnalyzeFieldsCoreAsync(fields, scan, ct);
+            if (summary is null) return;
+            AfterAnalysis();
+            Report($"Every class analyzed: {summary} Export now holds the whole collection.", StatusKind.Ok);
+        }, cancellable: true);
+    }
+
+    private bool CanAnalyzeAll() => IsTwoStep && IsConnected && !IsBusy;
+
+    /// <summary>Counts the given fields in every class (see <see cref="AnalyzeFieldsCoreAsync"/>).</summary>
+    private async Task AnalyzeFieldsAsync(IReadOnlyList<string> fields)
+    {
+        if (_twoStep is null || fields.Count == 0) return;
+        int? scan;
+        try { scan = ScanLimitValue(); }
+        catch (FormatException ex) { Report(ex.Message, StatusKind.Error); return; }
+
+        var what = fields.Count == 1 ? $"'{fields[0]}'" : $"{fields.Count} fields";
+        await RunGuarded($"Analyzing {what} in every class…", async ct =>
+        {
+            var summary = await AnalyzeFieldsCoreAsync(fields, scan, ct);
+            if (summary is null) return;
+            AfterAnalysis();
+            Report(summary, StatusKind.Ok);
+        }, cancellable: true);
+    }
+
+    /// <summary>
+    /// Counts the given fields in every class in one pass over the collection, or over its first N
+    /// documents by key while the scan limit is on: the server groups by class, field and value and
+    /// returns only counts, plus how many documents of each class it read. Returns a one-line
+    /// summary, or null when cancelled (nothing is changed then).
+    /// </summary>
+    private async Task<string?> AnalyzeFieldsCoreAsync(IReadOnlyList<string> fields, int? scan, CancellationToken ct)
+    {
+        var state = _twoStep!;
+        var coverage = scan is null ? "every document" : $"the first {scan:N0} documents";
+        var what = fields.Count == 1 ? $"'{fields[0]}'" : $"{fields.Count} fields";
+
+        var count = await _couchbase.CountDocumentsAsync(state.Bucket, state.Scope, state.Collection, ct);
+        var stats = new Dictionary<(string Class, string Field), TwoStepState.FieldStats>();
+        var docsPerClass = new Dictionary<string, long>(StringComparer.Ordinal);
+        var sync = new object();
+        var windowed = true;   // falls back to plain grouping if the server rejects window functions
+        var clock = Stopwatch.StartNew();
+        IProgress<(int Done, int Expected)> progress = new Progress<(int Done, int Expected)>(p =>
+        {
+            long docs;
+            lock (sync) docs = docsPerClass.Values.Sum();
+            ActivityPercent = Math.Min(100, p.Done * 100.0 / p.Expected);
+            SetActivity($"Analyzing {what} in every class over {coverage}: batch {p.Done} of ~{p.Expected} " +
+                        $"({ActivityPercent:0}%) · {docs:N0} documents read");
+        });
+        ActivityPercent = 0;
+        SetActivity($"Analyzing {what} in every class over {coverage}: starting…");
+
+        Task<IReadOnlyList<FieldValueRow>> Count(string after, string? end, bool w) =>
+            _couchbase.CountFieldValuesInRangeAsync(
+                state.Bucket, state.Scope, state.Collection, state.Discriminator,
+                fields, after, end, TwoStepState.TopPerRange, w, ct);
 
         try
         {
-            var total = await _couchbase.CountDocumentsAsync(bucket, scope, collection);
+            await RangePlanner.RunAsync(
+                count, scan, _options.BatchSize, _options.EffectiveParallelReads,
+                (after, n) => _couchbase.GetBatchEndKeyAsync(state.Bucket, state.Scope, state.Collection, after, n, ct),
+                async (after, end) =>
+                {
+                    IReadOnlyList<FieldValueRow> rows;
+                    bool w;
+                    lock (sync) w = windowed;
+                    try
+                    {
+                        rows = await Count(after, end, w);
+                    }
+                    catch (Exception ex) when (w && !ct.IsCancellationRequested)
+                    {
+                        // Older servers without window functions: count every value instead.
+                        lock (sync) windowed = false;
+                        Diagnostics = "The server did not accept the windowed count; every value is " +
+                                      "returned and totalled in the app instead.\n\n" + ExceptionReport.Describe(ex);
+                        rows = await Count(after, end, false);
+                    }
 
-            // Off the UI thread: millions of rows each resuming on the dispatcher would freeze the window.
-            await Task.Run(() => RunExportAsync(state, checkpointPath, total, progress, ct), ct);
+                    lock (sync)
+                        foreach (var group in rows.GroupBy(r => (Class: r.Class ?? ExportState.NoClass, r.Field)))
+                        {
+                            if (group.Key.Field == CouchbaseService.DocumentsField)
+                            {
+                                docsPerClass[group.Key.Class] =
+                                    docsPerClass.GetValueOrDefault(group.Key.Class) + group.Sum(r => r.Count);
+                                continue;
+                            }
+                            if (!stats.TryGetValue(group.Key, out var s))
+                                stats[group.Key] = s = new TwoStepState.FieldStats();
+                            s.Merge(group.ToList());
+                        }
+                },
+                (done, expected) => progress.Report((done, expected)),
+                ct,
+                _options.EffectivePause);
+        }
+        catch (Exception) when (ct.IsCancellationRequested)
+        {
+            Report("Analyze cancelled; nothing was changed.", StatusKind.Idle);
+            return null;
+        }
 
-            ExportProgress = "Writing the report…";
-            var countAtEnd = await _couchbase.CountDocumentsAsync(bucket, scope, collection);
-            var json = state.BuildReport(countAtEnd).ToJsonString(new JsonSerializerOptions
+        // A ticked field no document of a class holds is recorded as analyzed and absent, for every
+        // class whose sample lists it.
+        var now = DateTimeOffset.UtcNow;
+        foreach (var (cls, docs) in docsPerClass)
+        {
+            if (!state.Analyses.TryGetValue(cls, out var byField))
+                state.Analyses[cls] = byField = new Dictionary<string, TwoStepState.FieldStats>(StringComparer.Ordinal);
+            foreach (var field in fields)
+            {
+                var s = stats.GetValueOrDefault((cls, field));
+                if (s is null && (!state.Samples.TryGetValue(cls, out var sample) ||
+                                  sample.Fields.All(f => f.Name != field)))
+                    continue;   // neither held nor listed: nothing worth showing
+                s ??= new TwoStepState.FieldStats();
+                s.Base = docs;
+                s.ScanLimit = scan;
+                s.At = now;
+                byField[field] = s;
+            }
+        }
+
+        var approx = stats.Count(kv => kv.Value.Truncated);
+        return $"Analyzed {what} in {docsPerClass.Count} class(es) over {docsPerClass.Values.Sum():N0} documents " +
+               $"in {clock.Elapsed:m\\:ss}" +
+               (approx > 0 ? $"; {approx} class/field pair(s) have too many distinct values for exact top values." : ".");
+    }
+
+    /// <summary>After an analysis: the new numbers on screen, keeping the class and field shown.</summary>
+    private void AfterAnalysis()
+    {
+        var keep = SelectedField?.Name;
+        RefreshTwoStepReport();
+        if (SelectedClass is { } shown)
+        {
+            ShowClassSchema(shown);
+            SelectedField = Fields.FirstOrDefault(f => f.Name == keep);
+        }
+    }
+
+    [RelayCommand]
+    private void SelectScalarFields() => SetSelection(f => f.IsScalar);
+
+    [RelayCommand]
+    private void SelectAllFields() => SetSelection(_ => true);
+
+    [RelayCommand]
+    private void SelectNoFields() => SetSelection(_ => false);
+
+    /// <summary>Ticks or unticks the fields of the class on screen (other ticks stay as they are).</summary>
+    private void SetSelection(Func<FieldInfo, bool> pick)
+    {
+        foreach (var f in Fields) f.IsSelected = pick(f);
+    }
+
+    private void OnFieldPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(FieldInfo.IsSelected) || sender is not FieldInfo f) return;
+        if (f.IsSelected) _tickedFields.Add(f.Name);
+        else _tickedFields.Remove(f.Name);
+        SelectedFieldCount = _tickedFields.Count;
+    }
+
+    private void RefreshTwoStepReport()
+    {
+        if (_twoStep is null) return;
+        _report = _twoStep.BuildReport();
+        _reportClasses.Clear();
+        foreach (var node in _report["classes"]!.AsArray())
+            if (node is JsonObject cls) _reportClasses[cls["class"]?.ToString() ?? ""] = cls;
+
+        var dateField = _report["dateField"]?.ToString();
+        foreach (var entry in Classes)
+            if (_reportClasses.TryGetValue(entry.Name, out var cls))
+            {
+                entry.Status = cls["status"]?.ToString() ?? ClassEntry.Loaded;
+                entry.Detail = DescribeClass(cls, dateField, cls["exactCount"] is JsonValue);
+            }
+    }
+
+    // ---- Export ----
+
+    /// <summary>Saves what the last Load gathered. Reads nothing: the summary is already in memory.</summary>
+    [RelayCommand(CanExecute = nameof(CanExport))]
+    private async Task ExportAsync()
+    {
+        var report = _report!;
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Save the collection summary",
+            // bucket.scope.collection-yyyyMMdd-HHmm: the file covers every class of the collection.
+            FileName = $"{report["bucket"]}.{report["scope"]}.{report["collection"]}-{DateTime.Now:yyyyMMdd-HHmm}.json",
+            Filter = "JSON (*.json)|*.json",
+            DefaultExt = ".json"
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            var json = report.ToJsonString(new JsonSerializerOptions
             {
                 WriteIndented = true,
                 // Persian class names and values stay readable instead of \uXXXX escapes.
                 Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
             });
-            await File.WriteAllTextAsync(state.OutputPath, json, ct);
-            File.Delete(checkpointPath);
-
-            Report($"Exported '{collection}': {state.DocumentsRead:N0} documents, " +
-                   $"{state.Classes.Count} classes → {state.OutputPath}", StatusKind.Ok);
-        }
-        catch (OperationCanceledException)
-        {
-            var saved = ExportState.Load(checkpointPath)?.DocumentsRead ?? 0;
-            Report($"Export cancelled. {saved:N0} documents are saved; Export… again resumes it.",
-                   StatusKind.Idle);
+            await File.WriteAllTextAsync(dialog.FileName, json);
+            Report($"Saved {Long(report["classCount"]):N0} class(es), {Long(report["documentsRead"]):N0} documents, " +
+                   $"to {dialog.FileName}", StatusKind.Ok);
         }
         catch (Exception ex)
         {
-            var saved = ExportState.Load(checkpointPath)?.DocumentsRead ?? 0;
-            Report($"Export stopped by an error ({ExceptionReport.Summarize(ex)}). {saved:N0} documents " +
-                   "are saved; Export… again resumes it.", StatusKind.Error);
-            Diagnostics = ExceptionReport.Describe(ex);
-        }
-        finally
-        {
-            IsExporting = false;
-            _exportCts.Dispose();
-            _exportCts = null;
+            Report($"Could not save: {ExceptionReport.Summarize(ex)}", StatusKind.Error);
         }
     }
 
-    private async Task RunExportAsync(
-        ExportState state, string checkpointPath, long total, IProgress<string> progress, CancellationToken ct)
+    private bool CanExport() => HasLoaded && !IsBusy;
+
+    // ---- Exact counts ----
+    // A Load with a scan limit describes the first N documents. This optional step counts every
+    // class over the whole collection on the server, one key range of the batch size at a time
+    // (see BatchPlanner): only one row per class comes back per range, so the network carries
+    // counts, not documents. The server still goes through every document, so it takes a while on
+    // a large collection; the schema and values stay those of the documents Load read.
+
+    /// <summary>True when the last Load read only part of the collection, so exact counts would add something.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CountExactlyCommand))]
+    private bool _canCountExactly;
+
+    [RelayCommand(CanExecute = nameof(CanRunExactCount))]
+    private async Task CountExactlyAsync()
     {
-        var clock = Stopwatch.StartNew();
-        var resumedAt = state.DocumentsRead;
-
-        while (true)
+        var state = _loaded!;
+        await RunGuarded($"Counting every class of '{state.Collection}'…", async ct =>
         {
-            var inBatch = 0;
-            var lastKey = state.LastKey;
+            var count = await _couchbase.CountDocumentsAsync(state.Bucket, state.Scope, state.Collection, ct);
+            Dictionary<string, long> totals;
+            long withoutClass = 0;
 
-            await foreach (var (key, document) in _couchbase.ReadPageAsync(
-                               state.Bucket, state.Scope, state.Collection, state.LastKey, state.BatchSize, ct))
+            try
             {
-                state.Add(document);
-                lastKey = key;
-                if (++inBatch % 10_000 == 0)
-                    progress.Report(ProgressText(state, total, state.DocumentsRead - resumedAt, clock.Elapsed));
+                totals = await CountAllClassesAsync(
+                    state.Bucket, state.Scope, state.Collection, state.Discriminator, "Counting every class", ct);
+                withoutClass = totals.GetValueOrDefault(ExportState.NoClass);
+                totals.Remove(ExportState.NoClass);
+            }
+            catch (Exception) when (ct.IsCancellationRequested)
+            {
+                Report("Exact count cancelled; the counts shown are still those of the documents read.",
+                       StatusKind.Idle);
+                return;
             }
 
-            ct.ThrowIfCancellationRequested();
+            if (withoutClass > 0) totals[ExportState.NoClass] = withoutClass;
+            state.ExactCounts = totals;
+            state.ExactWithoutClass = withoutClass;
+            state.ExactTotal = totals.Values.Sum();
+            state.ExactCountedAt = DateTimeOffset.UtcNow;
 
-            // Only a finished batch is saved. A batch cut off part-way is not, so the counts on
-            // disk always describe exactly the documents up to LastKey.
-            state.LastKey = lastKey;
-            state.BatchesDone++;
-            state.UpdatedAt = DateTimeOffset.UtcNow;
-            state.Save(checkpointPath);
-            progress.Report(ProgressText(state, total, state.DocumentsRead - resumedAt, clock.Elapsed));
+            _report = state.BuildReport(count);
+            ShowReport(_report);
+            CanCountExactly = false;
 
-            if (inBatch < state.BatchSize) break;   // a short batch is the last one
-        }
+            var onlyCounted = totals.Keys.Count(k => !state.Classes.ContainsKey(k));
+            ClassesCaption = $"% of all {state.ExactTotal:N0} documents (exact count) · " +
+                             $"schema from the {state.DocumentsRead:N0} read";
+            Report($"Counted {totals.Count} class(es) over {state.ExactTotal:N0} documents" +
+                   (onlyCounted > 0
+                       ? $"; {onlyCounted} of them are not in the documents read, so they have counts only."
+                       : "."),
+                   StatusKind.Ok);
+        }, cancellable: true);
     }
 
-    private static string ProgressText(ExportState state, long total, long readThisRun, TimeSpan elapsed)
-    {
-        var rate = elapsed.TotalSeconds >= 1 ? readThisRun / elapsed.TotalSeconds : 0;
-        var percent = total > 0 ? Math.Min(100, state.DocumentsRead * 100.0 / total) : 0;
-        var text = $"{state.DocumentsRead:N0} / {total:N0} documents ({percent:0.0}%) · " +
-                   $"batch {state.BatchesDone + 1} · {rate:N0} docs/s";
-        if (rate > 0 && total > state.DocumentsRead)
-        {
-            var left = TimeSpan.FromSeconds((total - state.DocumentsRead) / rate);
-            text += left.TotalHours >= 1
-                ? $" · ~{(int)left.TotalHours}h {left.Minutes}m left"
-                : $" · ~{Math.Max(1, (int)Math.Ceiling(left.TotalMinutes))} min left";
-        }
-        return text;
-    }
+    private bool CanRunExactCount() => CanCountExactly && IsConnected && !IsBusy && _loaded is not null;
 
-    private bool CanExport() =>
-        IsConnected && !IsExporting &&
-        SelectedScope is not null &&
-        !string.IsNullOrWhiteSpace(SelectedCollection) &&
-        !string.IsNullOrWhiteSpace(Discriminator);
+    // ---- Shown summary: from Load, or from a saved file ----
+    // The class list, the schema and the distinct values are all read from one report (the JSON an
+    // export writes). Load builds it from the documents it read; Open export… reads it from a file.
 
-    [RelayCommand(CanExecute = nameof(IsExporting))]
-    private void CancelExport() => _exportCts?.Cancel();
-
-    // ---- Opened export file ----
-    // Shows a saved export in the Schema explorer instead of the cluster: the class list with the
-    // export's whole-collection counts, each class's schema, and each field's saved distinct
-    // values. Nothing is queried, so it works without a connection. Load classes, or picking
-    // another bucket, scope or collection, goes back to the cluster.
-
+    /// <summary>True while the summary on screen came from a file rather than the cluster.</summary>
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(AnalyzeCommand))]
     [NotifyCanExecuteChangedFor(nameof(CloseExportFileCommand))]
     private bool _isOffline;
 
     /// <summary>"From file: …" — shown above the class list while a file is open.</summary>
     [ObservableProperty] private string _offlineSource = "";
 
-    private readonly Dictionary<string, JsonObject> _offlineClasses = new(StringComparer.Ordinal);
+    private JsonObject? _report;
+    private readonly Dictionary<string, JsonObject> _reportClasses = new(StringComparer.Ordinal);
 
     [RelayCommand]
     private void OpenExportFile()
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Open a collection export",
-            Filter = "Collection export (*.json)|*.json|All files (*.*)|*.*",
+            Title = "Open a collection summary",
+            Filter = "Collection summary (*.json)|*.json|All files (*.*)|*.*",
             InitialDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CouchbaseInsight", "exports")
         };
         if (!Directory.Exists(dialog.InitialDirectory)) dialog.InitialDirectory = "";
         if (dialog.ShowDialog() != true) return;
 
+        var fileName = Path.GetFileName(dialog.FileName);
         try
         {
             var (report, unfinished) = ReadExportFile(dialog.FileName);
-            ShowExport(report, Path.GetFileName(dialog.FileName), unfinished);
+            ClearLoaded();
+            _report = report;
+            ShowReport(report);
+
+            var docs = Long(report["documentsRead"]);
+            var keyspace = $"{report["bucket"]}.{report["scope"]}.{report["collection"]}";
+            var when = report["finishedAt"]?.ToString() is { Length: >= 16 } f ? f[..16].Replace('T', ' ') + " UTC" : "";
+            IsOffline = true;
+            OfflineSource = unfinished
+                ? $"From file: {fileName} · unfinished, {docs:N0} documents so far"
+                : $"From file: {fileName} · saved {when}";
+            ClassesCaption = $"{keyspace} by '{report["discriminator"]}' · % of {docs:N0} documents";
+            Report($"Opened {fileName}: {Classes.Count} class(es), {docs:N0} documents. " +
+                   "Load goes back to the cluster.", StatusKind.Ok);
         }
         catch (Exception ex)
         {
-            Report($"Could not open '{Path.GetFileName(dialog.FileName)}': {ExceptionReport.Summarize(ex)}",
-                   StatusKind.Error);
+            Report($"Could not open '{fileName}': {ExceptionReport.Summarize(ex)}", StatusKind.Error);
             Diagnostics = ExceptionReport.Describe(ex);
         }
     }
 
     /// <summary>
-    /// A finished export, or the checkpoint of an unfinished one (from the exports folder): the
+    /// A saved summary, or the checkpoint of an unfinished load (from the exports folder): the
     /// checkpoint is turned into the same report, covering the documents read so far.
     /// </summary>
     private static (JsonObject Report, bool Unfinished) ReadExportFile(string path)
@@ -699,12 +1259,13 @@ public partial class MainViewModel : ObservableObject
             return ((JsonObject)JsonNode.Parse(built)!, true);
         }
 
-        throw new InvalidDataException("This is not a collection export: it has no \"classes\" list.");
+        throw new InvalidDataException("This is not a collection summary: it has no \"classes\" list.");
     }
 
-    private void ShowExport(JsonObject report, string fileName, bool unfinished)
+    /// <summary>Fills the class list from a report.</summary>
+    private void ShowReport(JsonObject report)
     {
-        CloseExportFile();
+        _reportClasses.Clear();
         Classes.Clear();
         SelectedClassEntry = null;
         ClearSchema();
@@ -712,62 +1273,67 @@ public partial class MainViewModel : ObservableObject
         foreach (var node in report["classes"]!.AsArray())
         {
             if (node is not JsonObject cls) continue;
-            var name = cls["class"]?.ToString() ?? "";
-            _offlineClasses[name] = cls;
+            _reportClasses[cls["class"]?.ToString() ?? ""] = cls;
         }
 
-        foreach (var (name, cls) in _offlineClasses.OrderBy(c => c.Key, StringComparer.OrdinalIgnoreCase))
+        var dateField = report["dateField"]?.ToString();
+        foreach (var (name, cls) in _reportClasses.OrderBy(c => c.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var exact = cls["exactCount"] is JsonValue;
             Classes.Add(new ClassEntry(
                 name,
-                Long(cls["count"]),
-                Double(cls["percent"]),
-                DescribeDateRange(cls["dateRange"] as JsonObject, report["dateField"]?.ToString())));
-
-        var docs = Long(report["documentsRead"]);
-        var keyspace = $"{report["bucket"]}.{report["scope"]}.{report["collection"]}";
-        var when = report["finishedAt"]?.ToString() is { Length: >= 16 } f ? f[..16].Replace('T', ' ') + " UTC" : "";
-
-        IsOffline = true;
-        OfflineSource = unfinished
-            ? $"From file: {fileName} · unfinished export, {docs:N0} documents so far"
-            : $"From file: {fileName} · exported {when}";
-        ClassesCaption = $"{keyspace} by '{report["discriminator"]}' · % of {docs:N0} documents (whole collection" +
-                         (unfinished ? ", so far)" : ")");
-        Report($"Opened {fileName}: {Classes.Count} class(es), {docs:N0} documents. " +
-               "Load classes goes back to the cluster.", StatusKind.Ok);
+                exact ? Long(cls["exactCount"]) : Long(cls["count"]),
+                exact ? Double(cls["exactPercent"]) : Double(cls["percent"]),
+                DescribeClass(cls, dateField, exact),
+                cls["status"]?.ToString() ?? ClassEntry.Loaded));
+        }
     }
 
-    private void ShowOfflineSchema(string className)
+    private void ShowClassSchema(string className)
     {
         ClearSchema();
-        if (!_offlineClasses.TryGetValue(className, out var cls)) return;
+        if (!_reportClasses.TryGetValue(className, out var cls)) return;
 
         var classCount = Long(cls["count"]);
+        var sampleSize = cls["sampleSize"] is JsonValue ? Long(cls["sampleSize"]) : classCount;
+
         foreach (var node in cls["fields"]?.AsArray() ?? [])
         {
             if (node is not JsonObject f) continue;
             var flags = f["flags"]?.AsArray().Select(x => x?.ToString()).ToList() ?? [];
-            Fields.Add(new FieldInfo
+            // Presence is over the class when the field was analyzed, else over the sample.
+            var basis = f["base"] is JsonValue ? Long(f["base"]) : sampleSize;
+            var field = new FieldInfo
             {
                 Name = f["name"]?.ToString() ?? "",
                 Types = string.Join(", ", f["types"]?.AsArray().Select(t => t?.ToString()) ?? []),
                 Occurrences = (int)Math.Min(int.MaxValue, Long(f["seen"])),
-                SampleSize = (int)Math.Min(int.MaxValue, classCount),
-                HasCaseDuplicate = flags.Contains("Case conflict")
-            });
+                SampleSize = (int)Math.Min(int.MaxValue, basis),
+                HasCaseDuplicate = flags.Contains("Case conflict"),
+                IsAnalyzed = f["analyzed"]?.GetValue<bool>() == true
+            };
+            field.IsSelected = _tickedFields.Contains(field.Name);
+            field.PropertyChanged += OnFieldPropertyChanged;
+            Fields.Add(field);
         }
+        SelectedFieldCount = _tickedFields.Count;
+
+        if (cls["inSample"]?.GetValue<bool>() == false)
+            Report($"'{className}' was only counted: none of its documents were among those read. " +
+                   "Load with a larger scan limit (or none) to see its schema.", StatusKind.Idle);
+
+        ShowSampleDocuments(cls);
 
         AnalyzedClass = className;
-        SampleSize = (int)Math.Min(int.MaxValue, classCount);
+        SampleSize = (int)Math.Min(int.MaxValue, sampleSize);
         FieldCount = Fields.Count;
         RequiredCount = Fields.Count(x => x.IsRequired);
         IssueCount = Fields.Count(x => x.HasCaseDuplicate || x.HasMultipleTypes);
-        Report($"'{className}' from file: {classCount:N0} document(s), {FieldCount} field(s).", StatusKind.Ok);
     }
 
-    private void ShowOfflineDistinctValues(FieldInfo? field)
+    private void ShowDistinctValues(FieldInfo? field)
     {
-        if (field is null || SelectedClass is null || !_offlineClasses.TryGetValue(SelectedClass, out var cls))
+        if (field is null || SelectedClass is null || !_reportClasses.TryGetValue(SelectedClass, out var cls))
         {
             DistinctValuesHeader = "Distinct values";
             return;
@@ -778,7 +1344,9 @@ public partial class MainViewModel : ObservableObject
             .FirstOrDefault(f => f["name"]?.ToString() == field.Name);
         if (saved?["distinct"] is not JsonObject distinct)
         {
-            DistinctValuesHeader = $"No distinct values saved for '{field.Name}' (objects and arrays have none)";
+            DistinctValuesHeader = _twoStep is not null
+                ? $"Press the button on the '{field.Name}' row, or tick it and Analyze selected, to count its values"
+                : $"No values kept for '{field.Name}' (objects and arrays have none)";
             return;
         }
 
@@ -791,32 +1359,142 @@ public partial class MainViewModel : ObservableObject
                 JsonValue jv when jv.TryGetValue<string>(out var str) => str,
                 var other => other.ToJsonString()
             };
-            DistinctValues.Add($"{value}    ×{Long(v["count"]):N0}");
+            DistinctValues.Add(new DistinctValueItem(
+                $"{value}    ×{Long(v["count"]):N0}",
+                v["exampleKey"] is JsonValue ek && ek.TryGetValue<string>(out var exampleKey) ? exampleKey : null));
         }
 
         var complete = distinct["complete"]?.GetValue<bool>() ?? false;
         var total = distinct["count"] is { } c ? $"{Long(c):N0}" : $"more than {Long(distinct["moreThan"]):N0}";
-        DistinctValuesHeader = complete
-            ? $"All {values.Count} distinct values of '{field.Name}' (from file)"
-            : $"Top {values.Count} of {total} distinct values of '{field.Name}' (from file)";
+        var otherCount = Long(distinct["otherCount"]);
+        var missing = Long(saved["missing"]);
+        DistinctValuesHeader =
+            (complete
+                ? $"All {values.Count} distinct values of '{field.Name}'"
+                : $"Top {values.Count} of {total} distinct values of '{field.Name}'") +
+            (otherCount > 0 ? $" · {otherCount:N0} other" : "") +
+            (missing > 0 ? $" · missing in {missing:N0}" : "") +
+            (distinct["over"] is JsonValue
+                ? distinct["scanLimit"] is JsonValue
+                    ? $" · over the {Long(distinct["over"]):N0} documents of the class in the first {Long(distinct["scanLimit"]):N0}"
+                    : $" · over all {Long(distinct["over"]):N0} documents of the class"
+                : "") +
+            (distinct["exact"]?.GetValue<bool>() == false ? " · approximate (too many distinct values)" : "") +
+            (distinct["min"] is { } mn && distinct["max"] is { } mx ? $" · min {Shorten(mn)} · max {Shorten(mx)}" : "");
+    }
+
+    /// <summary>Fills the Sample documents pane: a two-step sample's documents, or a Deep load's
+    /// oldest and newest document of the class.</summary>
+    private void ShowSampleDocuments(JsonObject cls)
+    {
+        SampleDocuments.Clear();
+        static string Pretty(JsonNode? doc) => doc?.ToJsonString(new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        }) ?? "";
+
+        if (cls["sampleDocuments"] is JsonArray docs)
+            foreach (var d in docs.OfType<JsonObject>())
+                SampleDocuments.Add(new SampleDocumentItem(d["key"]?.ToString() ?? "", Pretty(d["doc"])));
+        else if (cls["samples"] is JsonObject samples)
+            foreach (var which in new[] { "oldest", "newest" })
+                if (samples[which] is JsonObject d && d["key"] is not null)
+                    SampleDocuments.Add(new SampleDocumentItem(d["key"]!.ToString(), Pretty(d["doc"]), which));
+
+        var shapes = cls["keyPatterns"] is JsonArray kp && kp.Count > 0
+            ? " · keys " + string.Join(", ", kp.OfType<JsonObject>().Take(3).Select(k => $"{k["pattern"]}"))
+            : "";
+        SampleDocumentsHeader = $"Sample documents ({SampleDocuments.Count}){shapes}";
+        SelectedSampleDocument = SampleDocuments.FirstOrDefault();
+    }
+
+    /// <summary>The keyspace of what is on screen, escaped for a statement.</summary>
+    /// <summary>The keyspace of the documents on screen: the loaded or opened summary's, or, before
+    /// any Load (the collection preview), the bucket, scope and collection picked at the top.</summary>
+    private string ShownKeyspace()
+    {
+        var (bucket, scope, collection) = _report is not null
+            ? (_report["bucket"]?.ToString(), _report["scope"]?.ToString(), _report["collection"]?.ToString())
+            : (SelectedBucket, SelectedScope?.Name, SelectedCollection);
+        return string.IsNullOrEmpty(bucket) || string.IsNullOrEmpty(scope) || string.IsNullOrEmpty(collection)
+            ? ""
+            : $"{Escape(bucket)}.{Escape(scope)}.{Escape(collection)}";
+    }
+
+    /// <summary>Puts a by-key statement for the document in the Query tab and switches to it.</summary>
+    private void OpenInQuery(string key)
+    {
+        IsRawQuery = true;
+        RawStatement = $"SELECT META(c).id, c.*\nFROM {ShownKeyspace()} AS c\nUSE KEYS {JsonSerializer.Serialize(key)}";
+        SelectedTabIndex = 1;
+        Report($"Query tab: document '{key}'. Press Run (F5).", StatusKind.Ok);
+    }
+
+    [RelayCommand(CanExecute = nameof(HasSampleDocument))]
+    private void CopySampleKey() => CopyToClipboard(SelectedSampleDocument!.Key, "Key");
+
+    [RelayCommand(CanExecute = nameof(HasSampleDocument))]
+    private void OpenSampleInQuery() => OpenInQuery(SelectedSampleDocument!.Key);
+
+    private bool HasSampleDocument() => SelectedSampleDocument is not null;
+
+    /// <summary>Opens a document that holds the selected value.</summary>
+    [RelayCommand(CanExecute = nameof(HasValueExample))]
+    private void OpenValueExample() => OpenInQuery(SelectedDistinctValue!.ExampleKey!);
+
+    private bool HasValueExample() => SelectedDistinctValue?.ExampleKey is not null && _report is not null;
+
+    private static string Shorten(JsonNode node)
+    {
+        var text = node is JsonValue v && v.TryGetValue<string>(out var str) ? str : node.ToJsonString();
+        return text.Length > 40 ? text[..40] + "…" : text;
     }
 
     [RelayCommand(CanExecute = nameof(IsOffline))]
-    private void CloseExportFile()
+    private void CloseExportFile() => ClearLoaded();
+
+    /// <summary>Clears whatever summary is shown, loaded or opened from a file.</summary>
+    private void ClearLoaded()
     {
-        if (!IsOffline) return;
+        _twoStep = null;
+        IsTwoStep = false;
+        _tickedFields.Clear();
+        SelectedFieldCount = 0;
+        _loaded = null;
+        HasLoaded = false;
+        CanCountExactly = false;
+        _report = null;
+        _reportClasses.Clear();
         IsOffline = false;
         OfflineSource = "";
-        _offlineClasses.Clear();
         Classes.Clear();
         SelectedClassEntry = null;
         ClassesCaption = "";
         ClearSchema();
     }
 
+    /// <summary>The class tooltip under its counts: how much of it was read, its dates, TTL and key shapes.</summary>
+    private static string? DescribeClass(JsonObject cls, string? dateField, bool exact)
+    {
+        var lines = new List<string>();
+        if (exact)
+            lines.Add(cls["inSample"]?.GetValue<bool>() == true
+                ? $"exact count; schema from {Long(cls["count"]):N0} document(s) read"
+                : "exact count only: none of its documents were among those read");
+        if (DescribeDateRange(cls["dateRange"] as JsonObject, dateField) is { } dates) lines.Add(dates);
+        if (Long(cls["ttlCount"]) is > 0 and var ttl)
+            lines.Add($"with a TTL: {ttl:N0} ({Double(cls["ttlPercent"]):0.#}%)");
+        if (cls["lastWriteUtc"]?.ToString() is { Length: > 0 } lastWrite) lines.Add($"last write: {lastWrite}");
+        if (cls["keyPatterns"] is JsonArray patterns && patterns.Count > 0)
+            lines.Add("keys: " + string.Join(", ", patterns.OfType<JsonObject>().Take(3)
+                .Select(k => $"{k["pattern"]} ×{Long(k["count"]):N0}")));
+        return lines.Count == 0 ? null : string.Join("\n", lines);
+    }
+
     private static string? DescribeDateRange(JsonObject? range, string? field)
     {
-        if (range is null) return null;
+        if (range is null || string.IsNullOrEmpty(field)) return null;
         var min = range["minUtc"] ?? range["min"];
         var max = range["maxUtc"] ?? range["max"];
         if (min is null || max is null) return $"{field}: not present";
@@ -824,11 +1502,9 @@ public partial class MainViewModel : ObservableObject
         return $"{field}: {min} … {max}" + (missing > 0 ? $" ({missing:N0} without it)" : "");
     }
 
-    private static long Long(JsonNode? node) =>
-        node is JsonValue v && v.TryGetValue<double>(out var d) ? (long)d : 0;
+    private static long Long(JsonNode? node) => JsonNumber.ToLong(node);
 
-    private static double Double(JsonNode? node) =>
-        node is JsonValue v && v.TryGetValue<double>(out var d) ? d : 0;
+    private static double Double(JsonNode? node) => JsonNumber.ToDouble(node);
 
     // ---- Schema headline numbers ----
     // One property per number rather than one sentence containing all of them: the pane header
@@ -953,8 +1629,17 @@ public partial class MainViewModel : ObservableObject
 
         _store.Save(SavedConnections);
         SelectedConnection = profile;
-        Report($"Saved connection '{name}'.", StatusKind.Ok);
+        // Say which it was: a name already in the list (any letter case) updates that connection.
+        Report(existing is null
+                ? $"Saved new connection '{name}' ({SavedConnections.Count} saved)."
+                : $"Updated the saved connection '{existing.Name}' (a connection with that name already existed).",
+            StatusKind.Ok);
     }
+
+    [RelayCommand(CanExecute = nameof(HasConnectionString))]
+    private void CopyConnectionString() => CopyToClipboard(ConnectionString, "Connection string");
+
+    private bool HasConnectionString() => !string.IsNullOrWhiteSpace(ConnectionString);
 
     private bool CanSaveConnection() =>
         !string.IsNullOrWhiteSpace(ConnectionName) &&
@@ -999,6 +1684,12 @@ public partial class MainViewModel : ObservableObject
 
         // A failed connect is a form to correct, so put the form back.
         if (!IsConnected) IsConnectionPanelOpen = true;
+
+        // Start on the first bucket; its scopes then load and the first one is picked too. Done
+        // after the connect has finished, because a selection made while it is still running
+        // would find the window busy and load nothing.
+        else if (SelectedBucket is null && Buckets.Count > 0)
+            SelectedBucket = Buckets[0];
     }
 
     private bool CanConnect() => !IsBusy && !string.IsNullOrWhiteSpace(ConnectionString);
@@ -1018,111 +1709,6 @@ public partial class MainViewModel : ObservableObject
     }
 
     private bool CanDisconnect() => IsConnected && !IsBusy;
-
-    [RelayCommand(CanExecute = nameof(CanLoadClasses))]
-    private async Task LoadClassesAsync()
-    {
-        CloseExportFile();
-        var loadingText = ScanLimitValueOrNull() is { } limitText
-            ? $"Loading classes from the first {limitText:N0} documents…"
-            : "Loading classes…";
-        await RunGuarded(loadingText, async ct =>
-        {
-            Classes.Clear();
-            SelectedClassEntry = null;
-            ClassesCaption = "";
-            ClearSchema();
-
-            var scan = ScanLimitValue();
-            ClassCounts counts;
-            var cancelled = false;
-            if (scan is null)
-                (counts, cancelled) = await CountClassesInBatchesAsync(
-                    SelectedBucket!, SelectedScope!.Name, SelectedCollection!, Discriminator, ct);
-            else
-                counts = await _couchbase.GetClassesAsync(
-                    SelectedBucket!, SelectedScope!.Name, SelectedCollection!, Discriminator, scan, ct);
-
-            var classes = counts.Classes;
-            Classes.Clear();
-            foreach (var c in classes) Classes.Add(c);
-
-            ClassesCaption =
-                $"% of {counts.DocumentsRead:N0} documents read" +
-                (scan is not null && counts.DocumentsRead >= scan ? " (scan limit)" : "") +
-                (counts.WithoutClass > 0 ? $" · {counts.WithoutClass:N0} without '{Discriminator}'" : "");
-
-            if (classes.Count == 0)
-                Report($"No values found for discriminator '{Discriminator}'{Scanned(scan)}. " +
-                       (scan is null ? "Try another field." : "Try another field or a larger scan limit."),
-                       StatusKind.Error);
-            else
-                Report($"{classes.Count} class(es) found{Scanned(scan)}.", StatusKind.Ok);
-
-            if (cancelled)
-            {
-                ClassesCaption = $"Cancelled: % of the first {counts.DocumentsRead:N0} documents only";
-                Report($"Load classes cancelled after {counts.DocumentsRead:N0} documents; " +
-                       "the counts shown cover those only.", StatusKind.Idle);
-            }
-        }, cancellable: true);
-    }
-
-    private bool CanLoadClasses() =>
-        IsConnected && !IsBusy &&
-        SelectedScope is not null &&
-        !string.IsNullOrWhiteSpace(SelectedCollection) &&
-        !string.IsNullOrWhiteSpace(Discriminator);
-
-    [RelayCommand(CanExecute = nameof(CanAnalyze))]
-    private async Task AnalyzeAsync()
-    {
-        if (IsOffline)
-        {
-            ShowOfflineSchema(SelectedClass!);
-            return;
-        }
-
-        await RunGuarded($"Analyzing '{SelectedClass}'…", async ct =>
-        {
-            ClearSchema();
-
-            int? limit = AnalyzeAll ? null : 1000;
-            var scan = ScanLimitValue();
-            ClassSchema schema;
-            var cancelled = false;
-            if (AnalyzeAll && scan is null)
-                (schema, cancelled) = await AnalyzeInBatchesAsync(
-                    SelectedBucket!, SelectedScope!.Name, SelectedCollection!, Discriminator, SelectedClass!, ct);
-            else
-            {
-                var cls = SelectedClass!;
-                var of = limit is null ? "" : $" of up to {limit:N0}";
-                var progress = new Progress<int>(n => SetActivity($"Analyzing '{cls}': {n:N0}{of} document(s) read"));
-                schema = await _couchbase.AnalyzeClassAsync(
-                    SelectedBucket!, SelectedScope!.Name, SelectedCollection!,
-                    Discriminator, cls, limit, scan, progress, ct);
-            }
-
-            foreach (var f in schema.Fields) Fields.Add(f);
-
-            AnalyzedClass = schema.ClassName;
-            SampleSize = schema.SampleSize;
-            FieldCount = schema.Fields.Count;
-            RequiredCount = schema.Fields.Count(f => f.IsRequired);
-            IssueCount = schema.Fields.Count(f => f.HasCaseDuplicate || f.HasMultipleTypes);
-
-            if (cancelled)
-                Report($"Analyze cancelled: the schema shown covers the {schema.SampleSize:N0} " +
-                       $"'{schema.ClassName}' document(s) read so far.", StatusKind.Idle);
-            else
-                Report($"Analyzed '{schema.ClassName}' over {schema.SampleSize:N0} document(s){Scanned(scan)}.",
-                       StatusKind.Ok);
-        }, cancellable: true);
-    }
-
-    private bool CanAnalyze() =>
-        (IsConnected || IsOffline) && !IsBusy && !string.IsNullOrWhiteSpace(SelectedClass);
 
     [RelayCommand(CanExecute = nameof(CanSyncFromSelection))]
     private async Task SyncFromSelectionAsync()
@@ -1233,7 +1819,7 @@ public partial class MainViewModel : ObservableObject
 
     [RelayCommand]
     private void CopyDistinctValues() =>
-        CopyToClipboard(string.Join(Environment.NewLine, DistinctValues), "Values");
+        CopyToClipboard(string.Join(Environment.NewLine, DistinctValues.Select(v => v.ToString())), "Values");
 
     private string ComposedStatement()
     {
@@ -1247,7 +1833,7 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnSelectedBucketChanged(string? value)
     {
-        CloseExportFile();
+        ClearLoaded();
         Scopes.Clear();
         Collections.Clear();
         SelectedScope = null;
@@ -1261,6 +1847,10 @@ public partial class MainViewModel : ObservableObject
         {
             var scopes = await _couchbase.GetScopesAsync(value);
             foreach (var s in scopes) Scopes.Add(s);
+
+            // The first scope of the bucket, passing over Couchbase's own _default and _system
+            // when the bucket has scopes of its own: those are the ones worth looking at.
+            SelectedScope = Scopes.FirstOrDefault(sc => !sc.Name.StartsWith('_')) ?? Scopes.FirstOrDefault();
             ConnectionSummary = DescribeTarget();
             Report($"{Scopes.Count} scope(s) in '{value}'.", StatusKind.Ok);
         });
@@ -1268,7 +1858,7 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnSelectedScopeChanged(ScopeInfo? value)
     {
-        CloseExportFile();
+        ClearLoaded();
         Collections.Clear();
         SelectedCollection = null;
         Classes.Clear();
@@ -1280,7 +1870,7 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnSelectedCollectionChanged(string? value)
     {
-        CloseExportFile();
+        ClearLoaded();
         // The discriminator is a property of the collection — offer the collection's top-level
         // fields as choices. (Discriminator must be a single top-level identifier; see
         // CouchbaseService.GetClassesAsync.)
@@ -1302,58 +1892,16 @@ public partial class MainViewModel : ObservableObject
             foreach (var f in topLevel) DiscriminatorFields.Add(f.Name);
             ExportDateField = GuessDateField(topLevel.Select(f => f.Name)) ?? "createdts";
             _ = LoadCollectionSummaryAsync();
+            _ = LoadCollectionPreviewAsync();
             Report($"{DiscriminatorFields.Count} field(s) available as discriminator.", StatusKind.Ok);
         });
     }
 
     partial void OnSelectedFieldChanged(FieldInfo? value)
     {
-        CancelDistinctValues();
         DistinctValues.Clear();
-
-        if (IsOffline)
-        {
-            ShowOfflineDistinctValues(value);
-            return;
-        }
-
-        if (value is null || SelectedBucket is null || SelectedScope is null ||
-            SelectedCollection is null || SelectedClass is null)
-        {
-            DistinctValuesHeader = "Distinct values";
-            return;
-        }
-
-        var cts = new CancellationTokenSource();
-        _distinctValuesCts = cts;
-        _ = LoadDistinctValuesAsync(value.Name, cts.Token);
-    }
-
-    private async Task LoadDistinctValuesAsync(string fieldPath, CancellationToken ct)
-    {
-        DistinctValuesHeader = $"Loading '{fieldPath}'…";
-        try
-        {
-            var scan = ScanLimitValue();
-            var values = await _couchbase.GetDistinctValuesAsync(
-                SelectedBucket!, SelectedScope!.Name, SelectedCollection!,
-                Discriminator, SelectedClass!, fieldPath, 100, scan, ct);
-
-            if (ct.IsCancellationRequested) return;
-
-            DistinctValues.Clear();
-            foreach (var v in values) DistinctValues.Add(v);
-
-            DistinctValuesHeader = values.Count == 0
-                ? $"No values found for '{fieldPath}'"
-                : $"Top {values.Count} distinct values of '{fieldPath}'{Scanned(scan)}";
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (!ct.IsCancellationRequested)
-                DistinctValuesHeader = $"Error: {ex.Message}";
-        }
+        SelectedDistinctValue = null;
+        ShowDistinctValues(value);
     }
 
     // ---- Helpers ----
@@ -1417,6 +1965,7 @@ public partial class MainViewModel : ObservableObject
         IssueCount = 0;
         SampleSize = 0;
         DistinctValuesHeader = "Distinct values";
+        ShowCollectionPreview();
     }
 
     private void CancelDistinctValues()
@@ -1428,7 +1977,7 @@ public partial class MainViewModel : ObservableObject
 
     private void ResetHierarchy()
     {
-        CloseExportFile();
+        ClearLoaded();
         Buckets.Clear();
         Scopes.Clear();
         Collections.Clear();
@@ -1497,6 +2046,7 @@ public partial class MainViewModel : ObservableObject
             IsActivityVisible = false;
             IsActivityCancellable = false;
             ActivityLine = "";
+            ActivityPercent = null;
             _activityCts?.Dispose();
             _activityCts = null;
             IsBusy = false;
