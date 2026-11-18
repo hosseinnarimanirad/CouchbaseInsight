@@ -1902,7 +1902,12 @@ public partial class MainViewModel : ObservableObject
         DistinctValues.Clear();
         SelectedDistinctValue = null;
         ShowDistinctValues(value);
+        // Clicking a field asks for its values, so bring that tab forward.
+        if (value is not null) DetailTabIndex = 0;
     }
+
+    /// <summary>The tab under the field list: 0 = distinct values, 1 = sample documents.</summary>
+    [ObservableProperty] private int _detailTabIndex;
 
     // ---- Helpers ----
 
