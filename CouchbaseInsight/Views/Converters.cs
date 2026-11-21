@@ -141,3 +141,13 @@ public sealed class PercentToWidthConverter : IValueConverter
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();
 }
+
+/// <summary>A saved-query folder path as a group header: the path itself, or "(top level)" for none.</summary>
+public sealed class FolderLabelConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is string { Length: > 0 } folder ? folder : "(top level)";
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}

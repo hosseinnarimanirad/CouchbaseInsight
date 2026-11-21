@@ -37,9 +37,12 @@
     <Window.InputBindings>
         <KeyBinding Key="F5" Command="{Binding RunQueryCommand}" />
         <KeyBinding Key="Return" Modifiers="Control" Command="{Binding RunQueryCommand}" />
+        <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveQueryCommand}" />
     </Window.InputBindings>
 
     <Window.Resources>
+
+        <v:FolderLabelConverter x:Key="FolderLabel" />
 
         <!-- The two editors. AvalonEdit is a control, so everything above the text is stylable
              here; the brushes below the control — selection, caret, current line — are not, and
@@ -851,7 +854,110 @@
 
                 <!-- ========================= Query ========================= -->
                 <TabItem Header="Query">
+                    <!-- Left: the picked connection's saved queries. Right: editor, run row, result. -->
                     <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="280" MinWidth="200" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" MinWidth="520" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Saved queries -->
+                        <Border Grid.Column="0" Style="{StaticResource Card.Flush}">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Right" Style="{StaticResource Pill}"
+                                                Margin="6,0,0,0"
+                                                Visibility="{Binding SavedQueries.Count, Converter={StaticResource PositiveVis}}">
+                                            <TextBlock Style="{StaticResource Pill.Text}"
+                                                       Text="{Binding SavedQueries.Count}" />
+                                        </Border>
+                                        <TextBlock Text="Saved queries" Style="{StaticResource Text.Heading}"
+                                                   VerticalAlignment="Center" />
+                                    </DockPanel>
+                                </Border>
+
+                                <TextBlock DockPanel.Dock="Top" Margin="12,8,12,0"
+                                           Style="{StaticResource Text.Caption}" TextWrapping="Wrap"
+                                           Text="{Binding SavedQueriesCaption}" />
+
+                                <Border DockPanel.Dock="Top" Padding="8,6,8,4">
+                                    <TextBox Style="{StaticResource TextBox.Search}" Tag="Filter by name, folder, tag or text"
+                                             AutomationProperties.Name="Filter saved queries"
+                                             Text="{Binding SavedQueryFilter, UpdateSourceTrigger=PropertyChanged}"
+                                             Visibility="{Binding SavedQueries.Count, Converter={StaticResource PositiveVis}}" />
+                                </Border>
+
+                                <!-- New / Delete, then Import / Export. -->
+                                <Border DockPanel.Dock="Bottom" Style="{StaticResource CardFooter}">
+                                    <WrapPanel>
+                                        <Button Style="{StaticResource Button.Small}" Content="New" Margin="0,0,6,4"
+                                                Command="{Binding NewQueryCommand}"
+                                                ToolTip="Start an empty query in the SQL++ editor" />
+                                        <Button Style="{StaticResource Button.Small}" Content="Delete" Margin="0,0,6,4"
+                                                Command="{Binding DeleteSavedQueryCommand}"
+                                                ToolTip="Delete the selected saved query (asks first). Its text stays in the editor." />
+                                        <Button Style="{StaticResource Button.Small}" Content="Import…" Margin="0,0,6,4"
+                                                Command="{Binding ImportQueriesCommand}"
+                                                ToolTip="Add the queries of an exported file to this connection. A name already used in its folder gets (2)." />
+                                        <Button Style="{StaticResource Button.Small}" Content="Export…" Margin="0,0,6,4"
+                                                Command="{Binding ExportQueriesCommand}"
+                                                ToolTip="Save the queries listed here (all of them, or those the filter shows) to a file" />
+                                    </WrapPanel>
+                                </Border>
+
+                                <Grid>
+                                    <ListBox Style="{StaticResource EntryList}" AutomationProperties.Name="Saved queries"
+                                             ItemsSource="{Binding SavedQueriesView}"
+                                             SelectedItem="{Binding SelectedSavedQuery}"
+                                             VirtualizingPanel.IsVirtualizingWhenGrouping="True">
+                                        <ListBox.GroupStyle>
+                                            <GroupStyle>
+                                                <GroupStyle.HeaderTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Orientation="Horizontal" Margin="6,8,6,2">
+                                                            <TextBlock FontFamily="{StaticResource Font.Icons}" Text="&#xE8B7;"
+                                                                       Foreground="{DynamicResource Brush.TextTertiary}"
+                                                                       VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                            <TextBlock Style="{StaticResource Text.Caption}"
+                                                                       Text="{Binding Name, Converter={StaticResource FolderLabel}}" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </GroupStyle.HeaderTemplate>
+                                            </GroupStyle>
+                                        </ListBox.GroupStyle>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="10,0,0,0">
+                                                    <StackPanel.ToolTip>
+                                                        <TextBlock Style="{StaticResource Text.Mono}" MaxWidth="640"
+                                                                   TextWrapping="Wrap" Text="{Binding Statement}" />
+                                                    </StackPanel.ToolTip>
+                                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Style="{StaticResource Text.Caption}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Text="{Binding TagsText}"
+                                                               Visibility="{Binding TagsText, Converter={StaticResource NotEmptyVis}}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+
+                                    <StackPanel VerticalAlignment="Center"
+                                                Visibility="{Binding SavedQueries.Count, Converter={StaticResource ZeroVis}}">
+                                        <TextBlock Style="{StaticResource Glyph.Placeholder}" Text="&#xE74E;" />
+                                        <TextBlock Style="{StaticResource Text.Placeholder}" TextWrapping="Wrap" Margin="12,0"
+                                                   Text="No saved queries yet. Write one, give it a name above the editor, and press Save (Ctrl+S)." />
+                                    </StackPanel>
+                                </Grid>
+                            </DockPanel>
+                        </Border>
+
+                        <GridSplitter Grid.Column="1" Width="10" HorizontalAlignment="Stretch"
+                                      VerticalAlignment="Stretch" />
+
+                    <Grid Grid.Column="2">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -861,6 +967,56 @@
                         <!-- Statement builder -->
                         <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,8">
                             <StackPanel>
+
+                                <!-- Which saved query this is, and the fields that name and file it. Editing
+                                     Name or Folder and saving renames or moves the same query. -->
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="2*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="1.5*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="1.5*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.ColumnSpan="7" Margin="0,0,0,6"
+                                               Style="{StaticResource Text.Heading}"
+                                               Text="{Binding OpenQueryTitle}" />
+
+                                    <TextBlock Grid.Row="1" Text="Name" Style="{StaticResource Text.Label}" />
+                                    <TextBox Grid.Row="1" Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center"
+                                             AutomationProperties.Name="Query name" Tag="name"
+                                             IsEnabled="{Binding HasQueryOwner}"
+                                             Text="{Binding QueryName, UpdateSourceTrigger=PropertyChanged}" />
+
+                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="Folder" Style="{StaticResource Text.Label}" />
+                                    <TextBox Grid.Row="1" Grid.Column="3" Margin="0,0,12,0" VerticalAlignment="Center"
+                                             AutomationProperties.Name="Query folder" Tag="e.g. fixes/otp"
+                                             IsEnabled="{Binding HasQueryOwner}"
+                                             ToolTip="Folders are separated by / ; empty keeps the query at the top level"
+                                             Text="{Binding QueryFolder, UpdateSourceTrigger=PropertyChanged}" />
+
+                                    <TextBlock Grid.Row="1" Grid.Column="4" Text="Tags" Style="{StaticResource Text.Label}" />
+                                    <TextBox Grid.Row="1" Grid.Column="5" Margin="0,0,12,0" VerticalAlignment="Center"
+                                             AutomationProperties.Name="Query tags" Tag="comma, separated"
+                                             IsEnabled="{Binding HasQueryOwner}"
+                                             Text="{Binding QueryTags, UpdateSourceTrigger=PropertyChanged}" />
+
+                                    <StackPanel Grid.Row="1" Grid.Column="6" Orientation="Horizontal">
+                                        <Button Content="Save" MinWidth="70"
+                                                Command="{Binding SaveQueryCommand}"
+                                                ToolTip="Save this query under its name (Ctrl+S). On an opened query, also saves a new name, folder or tags." />
+                                        <Button Content="Save as new" Margin="6,0,0,0"
+                                                Command="{Binding SaveQueryAsNewCommand}"
+                                                ToolTip="Save a copy as another query, leaving the opened one as it was. A name already taken gets (2)." />
+                                    </StackPanel>
+                                </Grid>
 
                                 <!-- Builder mode: SELECT / FROM, then a condition at a time. -->
                                 <StackPanel Visibility="{Binding IsRawQuery, Converter={StaticResource NotBoolVis}}">
@@ -1024,6 +1180,7 @@
                                 </Grid>
                             </DockPanel>
                         </Border>
+                    </Grid>
                     </Grid>
                 </TabItem>
 

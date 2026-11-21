@@ -50,7 +50,7 @@ public partial class App : Application
         _couchbase = new CouchbaseService();
         var window = new MainWindow
         {
-            DataContext = new MainViewModel(_couchbase, store, profiles)
+            DataContext = new MainViewModel(_couchbase, store, profiles, new SavedQueryStore())
         };
         window.Show();
     }

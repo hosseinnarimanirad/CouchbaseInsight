@@ -45,6 +45,9 @@ public sealed class SavedQuery
     /// <summary>The folder and the name together, as shown in a flat list: <c>fixes/otp/by key</c>.</summary>
     public string Path => Folder.Length == 0 ? Name : $"{Folder}/{Name}";
 
+    /// <summary>The tags as one line for the list, e.g. "otp, fix".</summary>
+    public string TagsText => string.Join(", ", Tags);
+
     public SavedQuery Clone() => new()
     {
         Id = Id,

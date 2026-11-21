@@ -28,6 +28,14 @@ public partial class MainWindow : Window
 
     private void OnThemeChanged(AppTheme _) => UpdateEdgeColour();
 
+    // An open query with unsaved edits asks before the window goes, like switching to another one does.
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (DataContext is MainViewModel vm && !vm.ConfirmClose())
+            e.Cancel = true;
+        base.OnClosing(e);
+    }
+
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);

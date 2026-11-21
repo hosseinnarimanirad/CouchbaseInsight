@@ -33,10 +33,13 @@ public partial class MainViewModel : ObservableObject
     private CancellationTokenSource? _distinctValuesCts;
 
     public MainViewModel(
-        ICouchbaseService couchbase, IConnectionStore store, IEnumerable<ConnectionProfile> profiles)
+        ICouchbaseService couchbase, IConnectionStore store, IEnumerable<ConnectionProfile> profiles,
+        ISavedQueryStore queryStore)
     {
         _couchbase = couchbase;
         _store = store;
+        // Before a connection is selected below: selecting one lists its saved queries.
+        InitSavedQueries(queryStore);
 
         foreach (var p in profiles) SavedConnections.Add(p);
 
@@ -1598,6 +1601,7 @@ public partial class MainViewModel : ObservableObject
     // Switching the saved-connection dropdown loads its values into the editable fields.
     partial void OnSelectedConnectionChanged(ConnectionProfile? value)
     {
+        ReloadSavedQueries();
         if (value is null) return;
 
         ConnectionName = value.Name;
