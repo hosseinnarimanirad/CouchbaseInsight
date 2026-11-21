@@ -233,6 +233,18 @@ public sealed class SavedQueryStore : ISavedQueryStore
         }
     }
 
+    public int DeleteConnection(string connection)
+    {
+        lock (_gate)
+        {
+            var next = _queries.Where(q => !NameComparer.Equals(q.Connection, connection)).ToList();
+            var removed = _queries.Count - next.Count;
+            if (removed > 0)
+                Commit(next);
+            return removed;
+        }
+    }
+
     public string UniqueName(string connection, string folder, string name, Guid? except = null)
     {
         lock (_gate)

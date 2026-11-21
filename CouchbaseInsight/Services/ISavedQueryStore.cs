@@ -32,6 +32,9 @@ public interface ISavedQueryStore
     /// <summary>A name not yet used in that folder: <paramref name="name"/>, else "name (2)", "name (3)", ….</summary>
     string UniqueName(string connection, string folder, string name, Guid? except = null);
 
+    /// <summary>Removes every query of one connection, when the profile itself is deleted. Returns how many went.</summary>
+    int DeleteConnection(string connection);
+
     /// <summary>Moves every query of one connection to another, after the profile was renamed. Returns how many moved.</summary>
     int RenameConnection(string oldName, string newName);
 

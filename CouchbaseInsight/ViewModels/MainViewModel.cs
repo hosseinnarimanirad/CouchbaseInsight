@@ -1653,10 +1653,18 @@ public partial class MainViewModel : ObservableObject
     private void DeleteConnection()
     {
         var profile = SelectedConnection!;
+
+        // Its saved queries go with it; offer to export them first, so they can be imported later.
+        if (!ConfirmDeletingConnectionQueries(profile.Name, out var exportNote))
+            return;
+
         SavedConnections.Remove(profile);
         _store.Save(SavedConnections);
+        var removed = DeleteConnectionQueries(profile.Name);
         SelectedConnection = SavedConnections.FirstOrDefault();
-        Report($"Deleted connection '{profile.Name}'.", StatusKind.Ok);
+        Report($"Deleted connection '{profile.Name}'" +
+               (removed > 0 ? $" and its {removed} saved quer{(removed == 1 ? "y" : "ies")}" : "") +
+               $".{exportNote}", StatusKind.Ok);
     }
 
     private bool CanDeleteConnection() => SelectedConnection is not null;

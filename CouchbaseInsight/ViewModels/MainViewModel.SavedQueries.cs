@@ -337,19 +337,12 @@ public partial class MainViewModel
             return;
         }
 
-        var dialog = new Microsoft.Win32.SaveFileDialog
-        {
-            Title = "Export saved queries",
-            FileName = $"{SafeFileName(QueryOwner!)}-queries-{DateTime.Now:yyyyMMdd-HHmm}.json",
-            Filter = "Saved queries (*.json)|*.json",
-            DefaultExt = ".json"
-        };
-        if (dialog.ShowDialog() != true) return;
+        if (AskExportPath(QueryOwner!) is not { } path) return;
 
         try
         {
-            _queryStore.Export(dialog.FileName, queries);
-            Report($"Exported {queries.Count} quer{(queries.Count == 1 ? "y" : "ies")} to {dialog.FileName}", StatusKind.Ok);
+            _queryStore.Export(path, queries);
+            Report($"Exported {queries.Count} quer{(queries.Count == 1 ? "y" : "ies")} to {path}", StatusKind.Ok);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -383,6 +376,74 @@ public partial class MainViewModel
         {
             Report($"Import failed: {ex.Message}", StatusKind.Error);
         }
+    }
+
+    // ---- Deleting a connection ----
+
+    /// <summary>
+    /// Before a profile is deleted with its queries: when it has any, ask whether to export them.
+    /// Yes exports (cancelling the file dialog cancels the delete), No deletes them unexported.
+    /// Returns false when the delete should not go ahead.
+    /// </summary>
+    private bool ConfirmDeletingConnectionQueries(string connection, out string note)
+    {
+        note = "";
+        var queries = _queryStore?.ForConnection(connection) ?? [];
+        if (queries.Count == 0) return true;
+
+        var answer = MessageBox.Show(
+            $"'{connection}' has {queries.Count} saved quer{(queries.Count == 1 ? "y" : "ies")}, " +
+            "which are deleted with it." + Environment.NewLine + Environment.NewLine +
+            "Export them to a file first? They can be imported into another connection later.",
+            "Delete connection", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel);
+        if (answer == MessageBoxResult.Cancel) return false;
+        if (answer == MessageBoxResult.No) return true;
+
+        var path = AskExportPath(connection);
+        if (path is null) return false;
+        try
+        {
+            _queryStore!.Export(path, queries);
+            note = $" The queries were exported to {path}";
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Report($"Export failed, so nothing was deleted: {ex.Message}", StatusKind.Error);
+            return false;
+        }
+    }
+
+    private int DeleteConnectionQueries(string connection)
+    {
+        if (_queryStore is null) return 0;
+        try
+        {
+            var removed = _queryStore.DeleteConnection(connection);
+            // The open query belonged to that connection: keep its text, as an untitled query.
+            if (_openQuery is not null && SavedQueryStoreNames.Equals(_openQuery.Connection, connection))
+                _openQuery = null;
+            return removed;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            Report($"The connection was deleted, but its saved queries were not: {ex.Message}", StatusKind.Error);
+            return 0;
+        }
+    }
+
+    private static readonly StringComparer SavedQueryStoreNames = StringComparer.OrdinalIgnoreCase;
+
+    private static string? AskExportPath(string connection)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = $"Export the saved queries of '{connection}'",
+            FileName = $"{SafeFileName(connection)}-queries-{DateTime.Now:yyyyMMdd-HHmm}.json",
+            Filter = "Saved queries (*.json)|*.json",
+            DefaultExt = ".json"
+        };
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
     }
 
     // ---- Helpers ----
