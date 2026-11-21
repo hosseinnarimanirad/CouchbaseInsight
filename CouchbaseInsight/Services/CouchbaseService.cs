@@ -405,18 +405,24 @@ public class CouchbaseService : ICouchbaseService
         return analyzer.Build(collection).Fields;
     }
 
-    public async Task<(int Count, string Json)> RunQueryAsync(string statement, CancellationToken cancellationToken = default)
+    public async Task<QueryOutcome> RunQueryAsync(
+        string statement, bool readOnly, CancellationToken cancellationToken = default)
     {
         var cluster = EnsureConnected();
-        var options = new QueryOptions().CancellationToken(cancellationToken);
+        var options = new QueryOptions()
+            .Readonly(readOnly)
+            .Metrics(true)
+            .CancellationToken(cancellationToken);
         var result = await cluster.QueryAsync<JsonElement>(statement, options);
 
         var rows = new List<JsonElement>();
         await foreach (var row in result.WithCancellation(cancellationToken))
             rows.Add(row);
 
+        // Complete only once the rows have been read.
+        var metrics = result.MetaData?.Metrics;
         var json = JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true });
-        return (rows.Count, json);
+        return new QueryOutcome(rows.Count, json, metrics?.MutationCount, metrics?.ElapsedTime);
     }
 
     public async ValueTask DisposeAsync() => await DisconnectAsync();

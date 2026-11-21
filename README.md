@@ -1,7 +1,8 @@
 # CouchbaseInsight
 
 A WPF desktop tool for exploring Couchbase clusters: browse scopes and collections, infer document
-schemas, inspect distinct field values, and run N1QL queries.
+schemas, inspect distinct field values, and write, save and run N1QL queries, with writes kept behind
+a switch and a confirmation.
 
 ## The window
 
@@ -92,7 +93,35 @@ read — are pills in the pane header. Clicking a field lists its most frequent 
 send; *Edit as SQL++* hands that statement to a free-text editor for everything the builder cannot
 express (JOIN, ORDER BY, LIMIT, subqueries). The clause editor and the result pane are both
 syntax-highlighted, and Ctrl+F searches a result. **F5** or **Ctrl+Enter** runs the query; a
-running one can be cancelled.
+running one can be cancelled. The pill over the result gives the server's own numbers: rows and
+elapsed time for a read, documents changed for a write.
+
+**Saved queries.** The pane on the left of the Query tab lists the queries saved for the connection
+picked in the connection form, grouped by folder; the filter box matches name, folder, tag or
+statement text. They can be browsed and edited without a connection; only running needs one.
+Clicking a query opens it in the SQL++ editor. The row above the editor names it: *Name*, *Folder*
+(`fixes/otp`; `/` separates levels) and *Tags* (comma-separated). **Save** (Ctrl+S) writes the
+query back under the same identity, so changing its name or folder and saving renames or moves it;
+*Save as new* makes a copy, adding "(2)" when the name is taken. A `•` after the title marks unsaved
+edits, and opening another query, *New*, or closing the window asks before they are lost.
+*Import…* adds the queries of an exported file to the current connection (a name already used in
+its folder gets "(2)"); *Export…* saves the queries the list shows, all of them or those the filter
+matches. Deleting a connection deletes its saved queries too, after offering to export them.
+
+The queries live in `%APPDATA%\CouchbaseInsight\queries.json`, which holds no secrets. Every change
+is written to a temporary file and swapped in, with the previous version kept as
+`queries.json.bak`. A file that cannot be read is set aside as `queries.unreadable-<time>.json`
+rather than overwritten; a file that is locked makes the list read-only for that session.
+
+**Reads and writes.** A statement is a read only when its first keyword (comments and brackets
+skipped) is `SELECT`, `WITH`, `EXPLAIN`, `ADVISE` or `INFER`; anything else — `UPDATE`, `DELETE`,
+`INSERT`, `UPSERT`, `MERGE`, `CREATE INDEX`, `EXECUTE`, … — counts as a write, shows a red **WRITE**
+badge beside Run, and gets a ✎ in the saved list. Reads are sent with the server's read-only flag,
+so a write that got past the check is refused by the cluster itself. A write runs only while the
+**Allow writes** switch is on — it is off at launch and turns itself off on every connect and
+disconnect — and then only after a confirmation card that shows the whole statement and the cluster
+it goes to. Enter does not confirm it; Escape cancels. Cancelling a write that is already running
+only stops the wait in the app: the cluster may still have applied some or all of it.
 
 **Theme.** Light and dark, switched from the title bar. The choice is remembered in
 `%APPDATA%\CouchbaseInsight\ui.json`; before there is one, the app follows the Windows app theme.

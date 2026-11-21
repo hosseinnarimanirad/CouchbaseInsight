@@ -1773,8 +1773,25 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ClearWhere() => WhereClause = "";
 
+    /// <summary>
+    /// F5. A read runs at once, with the server's read-only flag on. A write runs only while
+    /// <see cref="AllowWrites"/> is on, and then only after the confirm card (see
+    /// MainViewModel.QueryRun.cs) has shown the statement and the cluster it is about to change.
+    /// </summary>
     [RelayCommand(CanExecute = nameof(CanRunQuery))]
     private async Task RunQueryAsync()
+    {
+        var statement = QueryPreview;
+        if (StatementClassifier.Classify(statement) == QueryKind.Read)
+        {
+            await ExecuteQueryAsync(statement, readOnly: true);
+            return;
+        }
+
+        RequestWrite(statement);
+    }
+
+    private async Task ExecuteQueryAsync(string statement, bool readOnly)
     {
         _queryCts?.Cancel();
         _queryCts?.Dispose();
@@ -1783,24 +1800,34 @@ public partial class MainViewModel : ObservableObject
 
         IsBusy = true;
         IsQueryRunning = true;
-        Report("Running query…", StatusKind.Busy);
+        Report(readOnly ? "Running query…" : "Running write…", StatusKind.Busy);
         QueryResult = "";
         QueryRowCount = -1;
+        QueryResultSummary = "";
         try
         {
-            var (count, json) = await _couchbase.RunQueryAsync(QueryPreview, ct);
-            QueryResult = json;
-            QueryRowCount = count;
-            Report($"Query complete — {count} row(s).", StatusKind.Ok);
+            var outcome = await _couchbase.RunQueryAsync(statement, readOnly, ct);
+            QueryResult = outcome.Json;
+            QueryRowCount = outcome.Count;
+            QueryResultSummary = DescribeOutcome(outcome, readOnly);
+            Report(readOnly
+                    ? $"Query complete — {outcome.Count} row(s)."
+                    : $"Write complete — {outcome.MutationCount?.ToString("N0") ?? "?"} document(s) changed.",
+                StatusKind.Ok);
         }
         catch (OperationCanceledException)
         {
-            Report("Query cancelled.", StatusKind.Idle);
+            // Cancelling only stops the wait here; a write the server already started can finish.
+            Report(readOnly
+                    ? "Query cancelled."
+                    : "Write cancelled here — the cluster may still have applied some or all of it. Check before running it again.",
+                readOnly ? StatusKind.Idle : StatusKind.Error);
         }
         catch (Exception ex)
         {
-            QueryResult = $"// {ExceptionReport.Summarize(ex)}\n\n{ExceptionReport.Describe(ex)}";
-            Report("Query failed.", StatusKind.Error);
+            QueryResult = $"// {ExceptionReport.Summarize(ex)}" + Environment.NewLine + Environment.NewLine +
+                          ExceptionReport.Describe(ex);
+            Report(readOnly ? "Query failed." : "Write failed.", StatusKind.Error);
         }
         finally
         {
@@ -1810,7 +1837,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     private bool CanRunQuery() =>
-        IsConnected && !IsBusy &&
+        IsConnected && !IsBusy && !IsWriteConfirmVisible &&
         !string.IsNullOrWhiteSpace(IsRawQuery ? RawStatement : FromKeyspace);
 
     [RelayCommand(CanExecute = nameof(CanCancelQuery))]

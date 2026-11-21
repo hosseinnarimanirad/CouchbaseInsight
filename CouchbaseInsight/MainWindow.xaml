@@ -38,6 +38,7 @@
         <KeyBinding Key="F5" Command="{Binding RunQueryCommand}" />
         <KeyBinding Key="Return" Modifiers="Control" Command="{Binding RunQueryCommand}" />
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveQueryCommand}" />
+        <KeyBinding Key="Escape" Command="{Binding CancelWriteCommand}" />
     </Window.InputBindings>
 
     <Window.Resources>
@@ -934,7 +935,25 @@
                                                         <TextBlock Style="{StaticResource Text.Mono}" MaxWidth="640"
                                                                    TextWrapping="Wrap" Text="{Binding Statement}" />
                                                     </StackPanel.ToolTip>
-                                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                    <DockPanel>
+                                                        <TextBlock DockPanel.Dock="Right" Text="&#xE70F;" Margin="6,0,0,0"
+                                                                   FontFamily="{StaticResource Font.Icons}" FontSize="11"
+                                                                   VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource Brush.Danger}"
+                                                                   ToolTip="Changes data">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="{x:Type TextBlock}">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Kind}" Value="Write">
+                                                                            <Setter Property="Visibility" Value="Visible" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                    </DockPanel>
                                                     <TextBlock Style="{StaticResource Text.Caption}"
                                                                TextTrimming="CharacterEllipsis"
                                                                Text="{Binding TagsText}"
@@ -1123,6 +1142,19 @@
                                           IsChecked="{Binding IsRawQuery}"
                                           VerticalAlignment="Center"
                                           ToolTip="Hand the composed statement to a free-text editor, for everything the builder cannot express — JOIN, ORDER BY, LIMIT, subqueries." />
+                                <CheckBox Style="{StaticResource Switch}" Margin="14,0,0,0"
+                                          Content="Allow writes"
+                                          IsChecked="{Binding AllowWrites}"
+                                          VerticalAlignment="Center"
+                                          AutomationProperties.Name="Allow writes"
+                                          ToolTip="Off: only reads run, and the server refuses anything that would change data. On: UPDATE, DELETE, INSERT, UPSERT, MERGE and other writes can run, each after a confirmation. Turns itself off on every connect and disconnect." />
+                                <Border Style="{StaticResource Pill}" Margin="10,0,0,0" VerticalAlignment="Center"
+                                        Background="{DynamicResource Brush.DangerSoft}"
+                                        Visibility="{Binding IsCurrentQueryWrite, Converter={StaticResource BoolVis}}"
+                                        ToolTip="This statement changes data (it does not start with SELECT, WITH, EXPLAIN, ADVISE or INFER)">
+                                    <TextBlock Style="{StaticResource Pill.Text}" Text="WRITE"
+                                               Foreground="{DynamicResource Brush.Danger}" />
+                                </Border>
                             </StackPanel>
 
                             <!-- The exact text that will be sent. The builder shows its parts; this
@@ -1156,7 +1188,7 @@
                                                 Visibility="{Binding QueryResult, Converter={StaticResource NotEmptyVis}}">
                                             <TextBlock Style="{StaticResource Pill.Text}"
                                                        Foreground="{DynamicResource Brush.Info}">
-                                                <Run Text="{Binding QueryRowCount, Mode=OneWay}" /><Run Text=" rows" />
+                                                <Run Text="{Binding QueryResultSummary, Mode=OneWay}" />
                                             </TextBlock>
                                         </Border>
                                         <TextBlock Text="Result" Style="{StaticResource Text.Heading}"
@@ -1216,6 +1248,40 @@
                     <TextBlock Text="This step cannot be cancelled; it finishes on its own."
                                Style="{StaticResource Text.Caption}" Margin="0,14,0,0"
                                Visibility="{Binding IsActivityCancellable, Converter={StaticResource NotBoolVis}}" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- ===================== Write confirmation ==================== -->
+        <!-- Before a statement that changes data runs: the whole statement, and the cluster it goes
+             to. Run write is deliberately not the default button, so Enter does not confirm;
+             Escape cancels. -->
+        <Grid Grid.Row="1" Grid.RowSpan="2" Panel.ZIndex="101"
+              Visibility="{Binding IsWriteConfirmVisible, Converter={StaticResource BoolVis}}">
+            <Border Background="{DynamicResource Brush.Window}" Opacity="0.72" />
+            <Border Style="{StaticResource Card}" Width="620" Padding="20,18"
+                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel>
+                    <TextBlock Text="Run this write?" Style="{StaticResource Text.Heading}" />
+                    <TextBlock Style="{StaticResource Text.Secondary}" TextWrapping="Wrap" Margin="0,6,0,0">
+                        <Run Text="It changes data on" /> <Run Text="{Binding PendingWriteTarget, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=". It cannot be undone from here." />
+                    </TextBlock>
+                    <Border Style="{StaticResource Card.Flush}" Margin="0,12,0,0" MaxHeight="260"
+                            Background="{DynamicResource Brush.Surface}">
+                        <ae:TextEditor Style="{StaticResource Editor}" IsReadOnly="True"
+                                       ShowLineNumbers="True"
+                                       AutomationProperties.Name="Write statement"
+                                       v:Editors.Syntax="N1ql"
+                                       v:Editors.Text="{Binding PendingWriteStatement, Mode=OneWay}" />
+                    </Border>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                        <Button Content="Cancel" MinWidth="90" IsCancel="True"
+                                Style="{StaticResource Button.Secondary}"
+                                Command="{Binding CancelWriteCommand}" />
+                        <Button Content="Run write" MinWidth="110" Margin="8,0,0,0"
+                                Style="{StaticResource Button.Danger}"
+                                Command="{Binding ConfirmWriteCommand}" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </Grid>

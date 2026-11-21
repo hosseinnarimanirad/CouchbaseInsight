@@ -117,6 +117,7 @@ public partial class MainViewModel
     {
         OnPropertyChanged(nameof(IsQueryDirty));
         OnPropertyChanged(nameof(OpenQueryTitle));
+        OnPropertyChanged(nameof(IsCurrentQueryWrite));
         SaveQueryCommand.NotifyCanExecuteChanged();
         SaveQueryAsNewCommand.NotifyCanExecuteChanged();
     }

@@ -88,6 +88,15 @@ public interface ICouchbaseService : IAsyncDisposable
     Task<IReadOnlyList<FieldInfo>> GetCollectionFieldsAsync(
         string bucket, string scope, string collection, int limit = 500);
 
-    /// <summary>Executes an arbitrary N1QL statement and returns the row count and rows as a pretty-printed JSON array.</summary>
-    Task<(int Count, string Json)> RunQueryAsync(string statement, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Executes an arbitrary N1QL statement and returns its rows as a pretty-printed JSON array,
+    /// with the server's mutation count and elapsed time. With <paramref name="readOnly"/> the
+    /// server itself refuses any statement that would change data.
+    /// </summary>
+    Task<QueryOutcome> RunQueryAsync(string statement, bool readOnly, CancellationToken cancellationToken = default);
 }
+
+/// <summary>What one statement returned: its rows, and for a write how many documents it changed.</summary>
+/// <param name="MutationCount">Documents inserted, updated or deleted; null when the server did not say.</param>
+/// <param name="Elapsed">The server's own elapsed time for the request, as it reports it (e.g. "12.3ms").</param>
+public sealed record QueryOutcome(int Count, string Json, ulong? MutationCount, string? Elapsed);

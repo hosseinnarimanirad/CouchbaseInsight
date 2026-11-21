@@ -105,7 +105,9 @@ public sealed class SavedQueryStore : ISavedQueryStore
             Name = Name.Trim(),
             Tags = NormalizeTags(Tags),
             Statement = Statement,
-            Kind = Kind,
+            // Worked out again on every load, so a file edited by hand or written before the
+            // classifier existed still marks its writes.
+            Kind = StatementClassifier.Classify(Statement),
             CreatedAt = CreatedAt,
             UpdatedAt = UpdatedAt
         };
@@ -184,6 +186,7 @@ public sealed class SavedQueryStore : ISavedQueryStore
         stored.Folder = NormalizeFolder(stored.Folder);
         stored.Name = stored.Name.Trim();
         stored.Tags = NormalizeTags(stored.Tags);
+        stored.Kind = StatementClassifier.Classify(stored.Statement);
 
         if (stored.Connection.Length == 0)
             throw new ArgumentException("A saved query needs a connection.", nameof(query));
