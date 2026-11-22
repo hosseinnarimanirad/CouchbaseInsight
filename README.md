@@ -108,7 +108,9 @@ stores. Two rows above it only write into it, at the caret:
 *New* starts `SELECT META(c).id, c.* FROM <picked collection> AS c WHERE ` with the caret at the
 end; left untouched it does not count as unsaved work. *Open in Query tab* (Schema explorer) puts a
 by-key statement in the editor and points the Query picker at the same collection. The editor and
-the result pane are both syntax-highlighted, and Ctrl+F searches a result. **F5** or **Ctrl+Enter** runs the query; a
+the result pane are both syntax-highlighted, and Ctrl+F searches a result. Every object and array
+of a result that spans more than one line folds from the ▸/▾ marker in the margin; a new result
+starts fully expanded, and *Expand all* / *Collapse all* in the result header do every fold at once. **F5** or **Ctrl+Enter** runs the query; a
 running one can be cancelled. The pill over the result gives the server's own numbers: rows and
 elapsed time for a read, documents changed for a write.
 

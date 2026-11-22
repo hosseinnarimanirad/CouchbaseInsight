@@ -1,8 +1,10 @@
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Xml;
 using CouchbaseInsight.Themes;
 using ICSharpCode.AvalonEdit;
+using ICSharpCode.AvalonEdit.Folding;
 using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Highlighting.Xshd;
 using ICSharpCode.AvalonEdit.Search;
@@ -114,6 +116,70 @@ public static class Editors
         };
     }
 
+    // ---- Folding: ▸/▾ markers in the margin ("Json"); the folds follow the text ----
+
+    public static readonly DependencyProperty FoldingProperty = DependencyProperty.RegisterAttached(
+        "Folding", typeof(string), typeof(Editors),
+        new PropertyMetadata(null, OnFoldingChanged));
+
+    public static void SetFolding(DependencyObject element, string value) =>
+        element.SetValue(FoldingProperty, value);
+
+    public static string GetFolding(DependencyObject element) =>
+        (string)element.GetValue(FoldingProperty);
+
+    private static readonly Dictionary<TextEditor, FoldingManager> FoldingManagers = [];
+
+    /// <summary>Folds every region of the target editor; enabled while it has any.</summary>
+    public static readonly RoutedUICommand CollapseAllCommand = new("Collapse all", "CollapseAll", typeof(Editors));
+
+    /// <summary>Unfolds every region of the target editor; enabled while it has any.</summary>
+    public static readonly RoutedUICommand ExpandAllCommand = new("Expand all", "ExpandAll", typeof(Editors));
+
+    static Editors()
+    {
+        // Class bindings, so a button only needs Command and CommandTarget, with no code-behind.
+        CommandManager.RegisterClassCommandBinding(typeof(TextEditor),
+            new CommandBinding(CollapseAllCommand, (s, _) => SetAllFolded((TextEditor)s, true), CanFold));
+        CommandManager.RegisterClassCommandBinding(typeof(TextEditor),
+            new CommandBinding(ExpandAllCommand, (s, _) => SetAllFolded((TextEditor)s, false), CanFold));
+    }
+
+    private static void OnFoldingChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is not TextEditor editor) return;
+
+        if (e.NewValue is not "Json")
+        {
+            if (FoldingManagers.Remove(editor, out var old)) FoldingManager.Uninstall(old);
+            return;
+        }
+
+        if (FoldingManagers.ContainsKey(editor)) return;
+        var manager = FoldingManager.Install(editor.TextArea);
+        FoldingManagers[editor] = manager;
+
+        // New text means new folds, all open: a fresh result starts fully expanded.
+        editor.TextChanged += (_, _) =>
+        {
+            if (!FoldingManagers.TryGetValue(editor, out var m)) return;
+            m.Clear();
+            m.UpdateFoldings(JsonFolding.Create(editor.Document), -1);
+            CommandManager.InvalidateRequerySuggested();
+        };
+        manager.UpdateFoldings(JsonFolding.Create(editor.Document), -1);
+    }
+
+    private static void CanFold(object sender, CanExecuteRoutedEventArgs e) =>
+        e.CanExecute = sender is TextEditor editor &&
+                       FoldingManagers.TryGetValue(editor, out var m) && m.AllFoldings.Any();
+
+    private static void SetAllFolded(TextEditor editor, bool folded)
+    {
+        if (!FoldingManagers.TryGetValue(editor, out var manager)) return;
+        foreach (var fold in manager.AllFoldings) fold.IsFolded = folded;
+    }
+
     // ---- CaretOffset: a two-way binding target, so a view model can insert at the caret ----
 
     public static readonly DependencyProperty CaretOffsetProperty = DependencyProperty.RegisterAttached(
@@ -206,6 +272,13 @@ public static class Editors
         editor.TextArea.SelectionBorder = null;
         editor.TextArea.SelectionForeground = null;
         editor.TextArea.Caret.CaretBrush = Brush("Brush.Text", Colors.Black);
+
+        // Fold markers (only shown where Folding is on). Their defaults are black on white,
+        // which would glare in the dark theme; these properties inherit down to the margin.
+        editor.SetValue(FoldingMargin.FoldingMarkerBrushProperty, Brush("Brush.TextTertiary", Colors.Gray));
+        editor.SetValue(FoldingMargin.FoldingMarkerBackgroundBrushProperty, Brush("Brush.Surface", Colors.White));
+        editor.SetValue(FoldingMargin.SelectedFoldingMarkerBrushProperty, Brush("Brush.Text", Colors.Black));
+        editor.SetValue(FoldingMargin.SelectedFoldingMarkerBackgroundBrushProperty, Brush("Brush.Hover", Colors.White));
 
         // Ctrl+F over a result that is thousands of lines long. Installed once per editor;
         // SearchPanel.Install is not idempotent, so it is guarded by the Searchable set.

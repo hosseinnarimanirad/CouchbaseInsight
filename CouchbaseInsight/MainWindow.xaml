@@ -600,6 +600,17 @@
                                                 Content="&#xE8C8;" Margin="6,0,0,0"
                                                 Command="{Binding CopyQueryResultCommand}"
                                                 ToolTip="Copy the JSON" />
+                                            <!-- Folding is the editor's own business: routed commands aimed at it, no view model. -->
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small}"
+                                                Content="Collapse all" Margin="6,0,0,0"
+                                                Command="{x:Static v:Editors.CollapseAllCommand}"
+                                                CommandTarget="{Binding ElementName=QueryResultEditor}"
+                                                ToolTip="Fold every object and array of the result" />
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small}"
+                                                Content="Expand all" Margin="6,0,0,0"
+                                                Command="{x:Static v:Editors.ExpandAllCommand}"
+                                                CommandTarget="{Binding ElementName=QueryResultEditor}"
+                                                ToolTip="Unfold everything" />
                                             <Border DockPanel.Dock="Right" Style="{StaticResource Pill}"
                                                 Background="{DynamicResource Brush.InfoSoft}"
                                                 Visibility="{Binding QueryResult, Converter={StaticResource NotEmptyVis}}">
@@ -614,10 +625,11 @@
                                     </Border>
 
                                     <Grid>
-                                        <ae:TextEditor Style="{StaticResource Editor}"
+                                        <ae:TextEditor x:Name="QueryResultEditor" Style="{StaticResource Editor}"
                                                    IsReadOnly="True"
                                                    ShowLineNumbers="True"
                                                    v:Editors.Syntax="Json"
+                                                   v:Editors.Folding="Json"
                                                    v:Editors.Text="{Binding QueryResult, Mode=OneWay}" />
 
                                         <StackPanel VerticalAlignment="Center"
