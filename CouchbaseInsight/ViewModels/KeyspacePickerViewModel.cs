@@ -86,10 +86,12 @@ public partial class KeyspacePickerViewModel : ObservableObject
         }
     }
 
-    /// <summary>Picks a whole path, waiting for the bucket's scopes; a part that does not exist is left unpicked.</summary>
+    /// <summary>Picks a whole path, waiting for the bucket's scopes. An unknown bucket (or no
+    /// connection) changes nothing; an unknown scope or collection is left unpicked.</summary>
     public async Task SelectAsync(string bucket, string scope, string collection)
     {
-        if (SelectedBucket != bucket) SelectedBucket = Buckets.Contains(bucket) ? bucket : null;
+        if (!Buckets.Contains(bucket)) return;
+        if (SelectedBucket != bucket) SelectedBucket = bucket;
         await _scopesLoaded;
         if (SelectedBucket != bucket) return;
 

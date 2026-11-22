@@ -90,6 +90,26 @@ public static partial class SqlText
         return Insert(text, caret, prefix + condition);
     }
 
+    /// <summary>
+    /// The first <c>bucket.scope.collection</c> after FROM, UPDATE or INTO, each part bare or backticked
+    /// (doubled backticks undone). Null when the statement names no full three-part keyspace,
+    /// e.g. <c>FROM `bucket`</c> or a subquery.
+    /// </summary>
+    public static (string Bucket, string Scope, string Collection)? FirstKeyspace(string statement)
+    {
+        var m = FromKeyspace().Match(statement);
+        if (!m.Success) return null;
+        static string Part(Group g) => g.Value.StartsWith('`') ? g.Value[1..^1].Replace("``", "`") : g.Value;
+        return (Part(m.Groups["b"]), Part(m.Groups["s"]), Part(m.Groups["c"]));
+    }
+
+    private const string Ident = @"(?:`(?:[^`]|``)+`|[A-Za-z_][\w-]*)";
+
+    // FROM for reads and DELETE; UPDATE, and INTO for INSERT / UPSERT / MERGE.
+    [GeneratedRegex(@"\b(?:FROM|UPDATE|INTO)\s+(?<b>" + Ident + @")\s*\.\s*(?<s>" + Ident + @")\s*\.\s*(?<c>" + Ident + ")",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex FromKeyspace();
+
     // Keywords inside quotes or comments are not told apart: good enough for placing a condition.
     [GeneratedRegex(@"\bWHERE\b", RegexOptions.IgnoreCase)]
     private static partial Regex WhereKeyword();

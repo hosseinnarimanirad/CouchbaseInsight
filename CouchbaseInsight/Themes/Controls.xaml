@@ -283,17 +283,22 @@
         </Style.Triggers>
     </Style>
 
+    <!-- A filled, borderless tint with semibold text. A white box with a 1px border is what a text
+         field looks like, so a button drawn that way read as a field with words in it. The border
+         stays at 1px in the fill colour, so the button keeps the same size as before. -->
     <Style x:Key="Button.Secondary" TargetType="{x:Type Button}" BasedOn="{StaticResource Button.Base}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.SurfaceAlt}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.SurfaceAlt}" />
         <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontWeight" Value="SemiBold" />
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="{DynamicResource Brush.Hover}" />
+                <Setter Property="Background" Value="{DynamicResource Brush.Track}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
             </Trigger>
             <Trigger Property="IsPressed" Value="True">
-                <Setter Property="Background" Value="{DynamicResource Brush.SurfaceAlt}" />
+                <Setter Property="Background" Value="{DynamicResource Brush.Border}" />
             </Trigger>
         </Style.Triggers>
     </Style>
@@ -323,9 +328,10 @@
 
     <!-- Small, quiet action that sits inside a dense row: copy, clear, sync. -->
     <Style x:Key="Button.Small" TargetType="{x:Type Button}" BasedOn="{StaticResource Button.Base}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <!-- Filled like Button.Secondary, for the same reason: not to look like a field. -->
+        <Setter Property="Background" Value="{DynamicResource Brush.SurfaceAlt}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.SurfaceAlt}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="9,2" />
         <Setter Property="MinHeight" Value="{StaticResource Size.Control.Dense}" />
@@ -415,6 +421,10 @@
     </Style>
 
     <Style TargetType="{x:Type TextBox}" BasedOn="{StaticResource Field.Base}">
+        <!-- Less vertical padding than a combo: the text host adds its own line spacing, and with
+             Field.Base's 4px a one-line box came out ~36px beside 30px combos. MinHeight now
+             decides, so boxes and dropdowns in a row share one height. -->
+        <Setter Property="Padding" Value="9,1" />
         <Setter Property="CaretBrush" Value="{DynamicResource Brush.Text}" />
         <Setter Property="SelectionBrush" Value="{DynamicResource Brush.Accent}" />
         <Setter Property="VerticalContentAlignment" Value="Center" />

@@ -118,6 +118,11 @@ public partial class QueryEditorViewModel : ObservableObject
     {
         Statement = statement;
         CaretOffset = 0;
+
+        // Follow the collection the statement reads from, so the picker, Paste collection and the
+        // field list match it. A statement without one leaves the picker where it was.
+        if (SqlText.FirstKeyspace(statement) is { } k)
+            _ = Picker.SelectAsync(k.Bucket, k.Scope, k.Collection);
     }
 
     /// <summary>A new query on the picked collection, with the caret after WHERE.</summary>

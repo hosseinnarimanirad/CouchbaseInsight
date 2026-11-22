@@ -1415,13 +1415,11 @@ public partial class MainViewModel : ObservableObject
     private string ShownKeyspace() =>
         ShownKeyspaceParts() is { } k ? SqlText.Keyspace(k.Bucket, k.Scope, k.Collection) : "";
 
-    /// <summary>Puts a by-key statement for the document in the Query tab, points the Query tab's
-    /// picker at the same collection (so its field list matches), and switches to it.</summary>
+    /// <summary>Puts a by-key statement for the document in the Query tab and switches to it; the
+    /// Query picker follows the statement's collection (see QueryEditorViewModel.Load).</summary>
     private void OpenInQuery(string key)
     {
         QueryEditor.Load($"SELECT META(c).id, c.*\nFROM {ShownKeyspace()} AS c\nUSE KEYS {JsonSerializer.Serialize(key)}");
-        if (ShownKeyspaceParts() is { } k)
-            _ = QueryEditor.Picker.SelectAsync(k.Bucket, k.Scope, k.Collection);
         SelectedTabIndex = QueryTab;
         Report($"Query tab: document '{key}'. Press Run (F5).", StatusKind.Ok);
     }
