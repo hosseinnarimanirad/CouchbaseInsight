@@ -117,6 +117,7 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(IsCurrentQueryWrite));
         SaveQueryCommand.NotifyCanExecuteChanged();
         SaveQueryAsNewCommand.NotifyCanExecuteChanged();
+        DuplicateQueryCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>Lists the picked profile's queries. Called whenever <see cref="SelectedConnection"/> changes.</summary>
@@ -126,6 +127,7 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(HasQueryOwner));
         OnPropertyChanged(nameof(SavedQueriesCaption));
         NewQueryCommand.NotifyCanExecuteChanged();
+        DuplicateQueryCommand.NotifyCanExecuteChanged();
         ImportQueriesCommand.NotifyCanExecuteChanged();
         ExportQueriesCommand.NotifyCanExecuteChanged();
         SaveQueryCommand.NotifyCanExecuteChanged();
@@ -220,6 +222,26 @@ public partial class MainViewModel
         SelectSavedQuerySilently(null);
         OnQueryEditStateChanged();
     }
+
+    /// <summary>
+    /// An unsaved copy of the open query to work on: same statement (edits included), folder and
+    /// tags, under a free name ("name (2)"). The original stays as it was last saved, so nothing
+    /// is lost and nothing is asked; Save then stores the copy as a new query.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanDuplicateQuery))]
+    private void DuplicateQuery()
+    {
+        if (_queryStore is null || QueryOwner is not { } owner || _openQuery is null) return;
+
+        var name = string.IsNullOrWhiteSpace(QueryName) ? _openQuery.Name : QueryName;
+        _openQuery = null;
+        QueryName = _queryStore.UniqueName(owner, QueryFolder, name);
+        SelectSavedQuerySilently(null);
+        OnQueryEditStateChanged();
+        Report($"Duplicated as '{QueryName}' — not saved yet.", StatusKind.Idle);
+    }
+
+    private bool CanDuplicateQuery() => HasQueryOwner && _openQuery is not null;
 
     /// <summary>Ctrl+S. Writes the open query back under its id, or saves a new one.</summary>
     [RelayCommand(CanExecute = nameof(CanSaveQuery))]

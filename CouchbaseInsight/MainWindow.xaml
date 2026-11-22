@@ -285,6 +285,354 @@
             <!-- Tabs -->
             <TabControl SelectedIndex="{Binding SelectedTabIndex}">
 
+                <!-- ========================= Query ========================= -->
+                <TabItem Header="Query">
+                    <!-- Left: the picked connection's saved queries. Right: editor, run row, result. -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="280" MinWidth="200" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="*" MinWidth="520" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Saved queries -->
+                        <Border Grid.Column="0" Style="{StaticResource Card.Flush}">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Right" Style="{StaticResource Pill}"
+                                                Margin="6,0,0,0"
+                                                Visibility="{Binding SavedQueries.Count, Converter={StaticResource PositiveVis}}">
+                                            <TextBlock Style="{StaticResource Pill.Text}"
+                                                       Text="{Binding SavedQueries.Count}" />
+                                        </Border>
+                                        <TextBlock Text="Saved queries" Style="{StaticResource Text.Heading}"
+                                                   VerticalAlignment="Center" />
+                                    </DockPanel>
+                                </Border>
+
+                                <TextBlock DockPanel.Dock="Top" Margin="12,8,12,0"
+                                           Style="{StaticResource Text.Caption}" TextWrapping="Wrap"
+                                           Text="{Binding SavedQueriesCaption}" />
+
+                                <Border DockPanel.Dock="Top" Padding="8,6,8,4">
+                                    <TextBox Style="{StaticResource TextBox.Search}" Tag="Filter by name, folder, tag or text"
+                                             AutomationProperties.Name="Filter saved queries"
+                                             Text="{Binding SavedQueryFilter, UpdateSourceTrigger=PropertyChanged}"
+                                             Visibility="{Binding SavedQueries.Count, Converter={StaticResource PositiveVis}}" />
+                                </Border>
+
+                                <!-- Delete, then Import / Export. New lives beside Save. -->
+                                <Border DockPanel.Dock="Bottom" Style="{StaticResource CardFooter}">
+                                    <WrapPanel>
+                                        <Button Style="{StaticResource Button.Small}" Content="Delete" Margin="0,0,6,4"
+                                                Command="{Binding DeleteSavedQueryCommand}"
+                                                ToolTip="Delete the selected saved query (asks first). Its text stays in the editor." />
+                                        <Button Style="{StaticResource Button.Small}" Content="Import…" Margin="0,0,6,4"
+                                                Command="{Binding ImportQueriesCommand}"
+                                                ToolTip="Add the queries of an exported file to this connection. A name already used in its folder gets (2)." />
+                                        <Button Style="{StaticResource Button.Small}" Content="Export…" Margin="0,0,6,4"
+                                                Command="{Binding ExportQueriesCommand}"
+                                                ToolTip="Save the queries listed here (all of them, or those the filter shows) to a file" />
+                                    </WrapPanel>
+                                </Border>
+
+                                <Grid>
+                                    <ListBox Style="{StaticResource EntryList}" AutomationProperties.Name="Saved queries"
+                                             ItemsSource="{Binding SavedQueriesView}"
+                                             SelectedItem="{Binding SelectedSavedQuery}"
+                                             VirtualizingPanel.IsVirtualizingWhenGrouping="True">
+                                        <ListBox.GroupStyle>
+                                            <GroupStyle>
+                                                <GroupStyle.HeaderTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Orientation="Horizontal" Margin="6,8,6,2">
+                                                            <TextBlock FontFamily="{StaticResource Font.Icons}" Text="&#xE8B7;"
+                                                                       Foreground="{DynamicResource Brush.TextTertiary}"
+                                                                       VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                            <TextBlock Style="{StaticResource Text.Caption}"
+                                                                       Text="{Binding Name, Converter={StaticResource FolderLabel}}" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </GroupStyle.HeaderTemplate>
+                                            </GroupStyle>
+                                        </ListBox.GroupStyle>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="10,0,0,0">
+                                                    <StackPanel.ToolTip>
+                                                        <TextBlock Style="{StaticResource Text.Mono}" MaxWidth="640"
+                                                                   TextWrapping="Wrap" Text="{Binding Statement}" />
+                                                    </StackPanel.ToolTip>
+                                                    <DockPanel>
+                                                        <TextBlock DockPanel.Dock="Right" Text="&#xE70F;" Margin="6,0,0,0"
+                                                                   FontFamily="{StaticResource Font.Icons}" FontSize="11"
+                                                                   VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource Brush.Danger}"
+                                                                   ToolTip="Changes data">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="{x:Type TextBlock}">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Kind}" Value="Write">
+                                                                            <Setter Property="Visibility" Value="Visible" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                    </DockPanel>
+                                                    <TextBlock Style="{StaticResource Text.Caption}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Text="{Binding TagsText}"
+                                                               Visibility="{Binding TagsText, Converter={StaticResource NotEmptyVis}}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+
+                                    <StackPanel VerticalAlignment="Center"
+                                                Visibility="{Binding SavedQueries.Count, Converter={StaticResource ZeroVis}}">
+                                        <TextBlock Style="{StaticResource Glyph.Placeholder}" Text="&#xE74E;" />
+                                        <TextBlock Style="{StaticResource Text.Placeholder}" TextWrapping="Wrap" Margin="12,0"
+                                                   Text="No saved queries yet. Write one, give it a name above the editor, and press Save (Ctrl+S)." />
+                                    </StackPanel>
+                                </Grid>
+                            </DockPanel>
+                        </Border>
+
+                        <GridSplitter Grid.Column="1" Width="10" HorizontalAlignment="Stretch"
+                                      VerticalAlignment="Stretch" />
+
+                        <Grid Grid.Column="2">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" MinHeight="230" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="*" MinHeight="160" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Query editor: name/folder/tags, collection, condition row, statement.
+                             The statement editor takes whatever height the splitter below leaves. -->
+                            <Border Grid.Row="0" Style="{StaticResource Card}">
+                                <DockPanel>
+
+                                    <!-- Which saved query this is, and the fields that name and file it. Editing
+                                     Name or Folder and saving renames or moves the same query. -->
+                                    <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="2*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="1.5*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="1.5*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <!-- Title on the left; running it on the right, the editor's toolbar. -->
+                                        <DockPanel Grid.ColumnSpan="7" Margin="0,0,0,8">
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                                <Border Style="{StaticResource Pill}" Margin="0,0,10,0" VerticalAlignment="Center"
+                                                    Background="{DynamicResource Brush.DangerSoft}"
+                                                    Visibility="{Binding IsCurrentQueryWrite, Converter={StaticResource BoolVis}}"
+                                                    ToolTip="This statement changes data (it does not start with SELECT, WITH, EXPLAIN, ADVISE or INFER)">
+                                                    <TextBlock Style="{StaticResource Pill.Text}" Text="WRITE"
+                                                           Foreground="{DynamicResource Brush.Danger}" />
+                                                </Border>
+                                                <CheckBox Style="{StaticResource Switch}" Margin="0,0,14,0"
+                                                      Content="Allow writes"
+                                                      IsChecked="{Binding AllowWrites}"
+                                                      VerticalAlignment="Center"
+                                                      AutomationProperties.Name="Allow writes"
+                                                      ToolTip="Off: only reads run, and the server refuses anything that would change data. On: UPDATE, DELETE, INSERT, UPSERT, MERGE and other writes can run, each after a confirmation. Turns itself off on every connect and disconnect." />
+                                                <Button Content="Cancel" MinWidth="80" Margin="0,0,6,0"
+                                                    Style="{StaticResource Button.Danger}"
+                                                    Command="{Binding CancelQueryCommand}"
+                                                    Visibility="{Binding IsQueryRunning, Converter={StaticResource BoolVis}}" />
+                                                <Button Content="Run query" MinWidth="110"
+                                                    Style="{StaticResource Button.Primary}"
+                                                    Command="{Binding RunQueryCommand}"
+                                                    ToolTip="Run the statement (F5 or Ctrl+Enter)" />
+                                            </StackPanel>
+                                            <TextBlock Style="{StaticResource Text.Heading}" VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Text="{Binding OpenQueryTitle}" />
+                                        </DockPanel>
+
+                                        <TextBlock Grid.Row="1" Text="Name" Style="{StaticResource Text.Label}" />
+                                        <TextBox Grid.Row="1" Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center"
+                                             AutomationProperties.Name="Query name" Tag="name"
+                                             IsEnabled="{Binding HasQueryOwner}"
+                                             Text="{Binding QueryName, UpdateSourceTrigger=PropertyChanged}" />
+
+                                        <TextBlock Grid.Row="1" Grid.Column="2" Text="Folder" Style="{StaticResource Text.Label}" />
+                                        <TextBox Grid.Row="1" Grid.Column="3" Margin="0,0,12,0" VerticalAlignment="Center"
+                                             AutomationProperties.Name="Query folder" Tag="e.g. fixes/otp"
+                                             IsEnabled="{Binding HasQueryOwner}"
+                                             ToolTip="Folders are separated by / ; empty keeps the query at the top level"
+                                             Text="{Binding QueryFolder, UpdateSourceTrigger=PropertyChanged}" />
+
+                                        <TextBlock Grid.Row="1" Grid.Column="4" Text="Tags" Style="{StaticResource Text.Label}" />
+                                        <TextBox Grid.Row="1" Grid.Column="5" Margin="0,0,12,0" VerticalAlignment="Center"
+                                             AutomationProperties.Name="Query tags" Tag="comma, separated"
+                                             IsEnabled="{Binding HasQueryOwner}"
+                                             Text="{Binding QueryTags, UpdateSourceTrigger=PropertyChanged}" />
+
+                                        <StackPanel Grid.Row="1" Grid.Column="6" Orientation="Horizontal">
+                                            <Button Content="New" MinWidth="60" Margin="0,0,6,0"
+                                                Command="{Binding NewQueryCommand}"
+                                                ToolTip="Start a new query on the picked collection (asks first if this one has unsaved changes)" />
+                                            <Button Content="Duplicate" Margin="0,0,6,0"
+                                                Command="{Binding DuplicateQueryCommand}"
+                                                ToolTip="Make an unsaved copy of this query under a free name, to change without touching the original. Save stores the copy." />
+                                            <Button Content="Save" MinWidth="70"
+                                                Command="{Binding SaveQueryCommand}"
+                                                ToolTip="Save this query under its name (Ctrl+S). On an opened query, also saves a new name, folder or tags." />
+                                            <Button Content="Save as new" Margin="6,0,0,0"
+                                                Command="{Binding SaveQueryAsNewCommand}"
+                                                ToolTip="Save a copy as another query, leaving the opened one as it was. A name already taken gets (2)." />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- One editor, one statement. The two rows above it only write into it,
+                                     at the caret; nothing is composed or kept anywhere else. -->
+                                    <DockPanel DataContext="{Binding QueryEditor}">
+
+                                        <!-- The Query tab's own collection, independent of the Schema explorer's. -->
+                                        <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" MinWidth="120" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" MinWidth="120" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" MinWidth="120" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <ComboBox Grid.Column="0" ItemsSource="{Binding Picker.Buckets}" Tag="Bucket"
+                                                  AutomationProperties.Name="Query bucket"
+                                                  SelectedItem="{Binding Picker.SelectedBucket}" VerticalAlignment="Center"
+                                                  ToolTip="Bucket" />
+                                            <TextBlock Grid.Column="1" Style="{StaticResource Chevron}" />
+                                            <ComboBox Grid.Column="2" ItemsSource="{Binding Picker.Scopes}" Tag="Scope"
+                                                  AutomationProperties.Name="Query scope"
+                                                  DisplayMemberPath="Name"
+                                                  SelectedItem="{Binding Picker.SelectedScope}" VerticalAlignment="Center"
+                                                  ToolTip="Scope" />
+                                            <TextBlock Grid.Column="3" Style="{StaticResource Chevron}" />
+                                            <ComboBox Grid.Column="4" ItemsSource="{Binding Picker.Collections}" Tag="Collection"
+                                                  AutomationProperties.Name="Query collection"
+                                                  SelectedItem="{Binding Picker.SelectedCollection}" VerticalAlignment="Center"
+                                                  ToolTip="Collection: what Paste collection inserts and what the field list below is sampled from" />
+
+                                            <!-- Not focusable, so the editor keeps the keyboard and its caret. -->
+                                            <Button Grid.Column="5" Content="Paste collection" Margin="10,0,0,0"
+                                                Focusable="False"
+                                                Command="{Binding PasteCollectionCommand}"
+                                                ToolTip="Insert `bucket`.`scope`.`collection` of the picked collection at the caret" />
+                                        </Grid>
+
+                                        <!-- One condition at a time, inserted at the caret. -->
+                                        <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="120" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Text="WHERE" Style="{StaticResource Text.Label}" />
+                                            <!-- Type to narrow the list (any part of the name); typing a whole name picks it. -->
+                                        <ComboBox Grid.Column="1" AutomationProperties.Name="Condition field" ItemsSource="{Binding FieldsView}"
+                                                  DisplayMemberPath="Name" TextSearch.TextPath="Name" Tag="Field"
+                                                  Style="{StaticResource ComboBox.Mono}"
+                                                  IsEditable="True" IsTextSearchEnabled="False"
+                                                  StaysOpenOnEdit="True"
+                                                  Text="{Binding FieldSearch, UpdateSourceTrigger=PropertyChanged}"
+                                                  IsDropDownOpen="{Binding IsFieldListOpen}"
+                                                  SelectedItem="{Binding PendingField}"
+                                                  ToolTip="Fields of the picked collection, sorted by name, from a sample of its documents. Type any part of a name to narrow the list." />
+                                            <ComboBox Grid.Column="2" Margin="6,0" AutomationProperties.Name="Condition operator"
+                                                  ItemsSource="{Binding Operators}"
+                                                  SelectedItem="{Binding PendingOperator}" />
+                                            <TextBox Grid.Column="3" Style="{StaticResource TextBox.Mono}" AutomationProperties.Name="Condition value"
+                                                 Margin="0,0,6,0" VerticalAlignment="Center"
+                                                 Text="{Binding PendingValue, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsEnabled="{Binding ValueEnabled}"
+                                                 Tag="value, typed bare"
+                                                 ToolTip="Type the value without quotes; Add quotes it the way the field's type needs" />
+                                            <Button Grid.Column="4" Content="Add" MinWidth="58"
+                                                Command="{Binding AddConditionCommand}"
+                                                ToolTip="Insert this condition at the caret: with WHERE when none comes before it, AND after another condition" />
+                                        </Grid>
+
+                                        <Border Style="{StaticResource Card.Flush}" MinHeight="80"
+                                            Background="{DynamicResource Brush.Surface}">
+                                            <ae:TextEditor Style="{StaticResource Editor}"
+                                                       AutomationProperties.Name="Query"
+                                                       ShowLineNumbers="True"
+                                                       v:Editors.Syntax="N1ql"
+                                                       v:Editors.Text="{Binding Statement, Mode=TwoWay,
+                                                                                UpdateSourceTrigger=PropertyChanged}"
+                                                       v:Editors.CaretOffset="{Binding CaretOffset, Mode=TwoWay}" />
+                                        </Border>
+                                    </DockPanel>
+                                </DockPanel>
+                            </Border>
+
+                            <!-- Drag to share the height between the editor and the result. -->
+                            <GridSplitter Grid.Row="1" Height="10" ResizeDirection="Rows"
+                                      HorizontalAlignment="Stretch"
+                                      VerticalAlignment="Stretch" />
+
+                            <!-- Result -->
+                            <Border Grid.Row="2" Style="{StaticResource Card.Flush}">
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small.Icon}"
+                                                Content="&#xE8C8;" Margin="6,0,0,0"
+                                                Command="{Binding CopyQueryResultCommand}"
+                                                ToolTip="Copy the JSON" />
+                                            <Border DockPanel.Dock="Right" Style="{StaticResource Pill}"
+                                                Background="{DynamicResource Brush.InfoSoft}"
+                                                Visibility="{Binding QueryResult, Converter={StaticResource NotEmptyVis}}">
+                                                <TextBlock Style="{StaticResource Pill.Text}"
+                                                       Foreground="{DynamicResource Brush.Info}">
+                                                <Run Text="{Binding QueryResultSummary, Mode=OneWay}" />
+                                                </TextBlock>
+                                            </Border>
+                                            <TextBlock Text="Result" Style="{StaticResource Text.Heading}"
+                                                   VerticalAlignment="Center" />
+                                        </DockPanel>
+                                    </Border>
+
+                                    <Grid>
+                                        <ae:TextEditor Style="{StaticResource Editor}"
+                                                   IsReadOnly="True"
+                                                   ShowLineNumbers="True"
+                                                   v:Editors.Syntax="Json"
+                                                   v:Editors.Text="{Binding QueryResult, Mode=OneWay}" />
+
+                                        <StackPanel VerticalAlignment="Center"
+                                                Visibility="{Binding QueryResult, Converter={StaticResource EmptyVis}}">
+                                            <TextBlock Style="{StaticResource Glyph.Placeholder}" Text="&#xE773;" />
+                                            <TextBlock Style="{StaticResource Text.Placeholder}"
+                                                   Text="Run a query to see its rows here. Ctrl+F searches the result." />
+                                        </StackPanel>
+                                    </Grid>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </TabItem>
+
                 <!-- ===================== Schema explorer ==================== -->
                 <TabItem Header="Schema explorer">
                     <DockPanel>
@@ -853,352 +1201,6 @@
                             </TabControl>
                         </Grid>
                     </DockPanel>
-                </TabItem>
-
-                <!-- ========================= Query ========================= -->
-                <TabItem Header="Query">
-                    <!-- Left: the picked connection's saved queries. Right: editor, run row, result. -->
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="280" MinWidth="200" />
-                            <ColumnDefinition Width="10" />
-                            <ColumnDefinition Width="*" MinWidth="520" />
-                        </Grid.ColumnDefinitions>
-
-                        <!-- Saved queries -->
-                        <Border Grid.Column="0" Style="{StaticResource Card.Flush}">
-                            <DockPanel>
-                                <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
-                                    <DockPanel>
-                                        <Border DockPanel.Dock="Right" Style="{StaticResource Pill}"
-                                                Margin="6,0,0,0"
-                                                Visibility="{Binding SavedQueries.Count, Converter={StaticResource PositiveVis}}">
-                                            <TextBlock Style="{StaticResource Pill.Text}"
-                                                       Text="{Binding SavedQueries.Count}" />
-                                        </Border>
-                                        <TextBlock Text="Saved queries" Style="{StaticResource Text.Heading}"
-                                                   VerticalAlignment="Center" />
-                                    </DockPanel>
-                                </Border>
-
-                                <TextBlock DockPanel.Dock="Top" Margin="12,8,12,0"
-                                           Style="{StaticResource Text.Caption}" TextWrapping="Wrap"
-                                           Text="{Binding SavedQueriesCaption}" />
-
-                                <Border DockPanel.Dock="Top" Padding="8,6,8,4">
-                                    <TextBox Style="{StaticResource TextBox.Search}" Tag="Filter by name, folder, tag or text"
-                                             AutomationProperties.Name="Filter saved queries"
-                                             Text="{Binding SavedQueryFilter, UpdateSourceTrigger=PropertyChanged}"
-                                             Visibility="{Binding SavedQueries.Count, Converter={StaticResource PositiveVis}}" />
-                                </Border>
-
-                                <!-- New / Delete, then Import / Export. -->
-                                <Border DockPanel.Dock="Bottom" Style="{StaticResource CardFooter}">
-                                    <WrapPanel>
-                                        <Button Style="{StaticResource Button.Small}" Content="New" Margin="0,0,6,4"
-                                                Command="{Binding NewQueryCommand}"
-                                                ToolTip="Start an empty query in the SQL++ editor" />
-                                        <Button Style="{StaticResource Button.Small}" Content="Delete" Margin="0,0,6,4"
-                                                Command="{Binding DeleteSavedQueryCommand}"
-                                                ToolTip="Delete the selected saved query (asks first). Its text stays in the editor." />
-                                        <Button Style="{StaticResource Button.Small}" Content="Import…" Margin="0,0,6,4"
-                                                Command="{Binding ImportQueriesCommand}"
-                                                ToolTip="Add the queries of an exported file to this connection. A name already used in its folder gets (2)." />
-                                        <Button Style="{StaticResource Button.Small}" Content="Export…" Margin="0,0,6,4"
-                                                Command="{Binding ExportQueriesCommand}"
-                                                ToolTip="Save the queries listed here (all of them, or those the filter shows) to a file" />
-                                    </WrapPanel>
-                                </Border>
-
-                                <Grid>
-                                    <ListBox Style="{StaticResource EntryList}" AutomationProperties.Name="Saved queries"
-                                             ItemsSource="{Binding SavedQueriesView}"
-                                             SelectedItem="{Binding SelectedSavedQuery}"
-                                             VirtualizingPanel.IsVirtualizingWhenGrouping="True">
-                                        <ListBox.GroupStyle>
-                                            <GroupStyle>
-                                                <GroupStyle.HeaderTemplate>
-                                                    <DataTemplate>
-                                                        <StackPanel Orientation="Horizontal" Margin="6,8,6,2">
-                                                            <TextBlock FontFamily="{StaticResource Font.Icons}" Text="&#xE8B7;"
-                                                                       Foreground="{DynamicResource Brush.TextTertiary}"
-                                                                       VerticalAlignment="Center" Margin="0,0,6,0" />
-                                                            <TextBlock Style="{StaticResource Text.Caption}"
-                                                                       Text="{Binding Name, Converter={StaticResource FolderLabel}}" />
-                                                        </StackPanel>
-                                                    </DataTemplate>
-                                                </GroupStyle.HeaderTemplate>
-                                            </GroupStyle>
-                                        </ListBox.GroupStyle>
-                                        <ListBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <StackPanel Margin="10,0,0,0">
-                                                    <StackPanel.ToolTip>
-                                                        <TextBlock Style="{StaticResource Text.Mono}" MaxWidth="640"
-                                                                   TextWrapping="Wrap" Text="{Binding Statement}" />
-                                                    </StackPanel.ToolTip>
-                                                    <DockPanel>
-                                                        <TextBlock DockPanel.Dock="Right" Text="&#xE70F;" Margin="6,0,0,0"
-                                                                   FontFamily="{StaticResource Font.Icons}" FontSize="11"
-                                                                   VerticalAlignment="Center"
-                                                                   Foreground="{DynamicResource Brush.Danger}"
-                                                                   ToolTip="Changes data">
-                                                            <TextBlock.Style>
-                                                                <Style TargetType="{x:Type TextBlock}">
-                                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                                    <Style.Triggers>
-                                                                        <DataTrigger Binding="{Binding Kind}" Value="Write">
-                                                                            <Setter Property="Visibility" Value="Visible" />
-                                                                        </DataTrigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </TextBlock.Style>
-                                                        </TextBlock>
-                                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                                    </DockPanel>
-                                                    <TextBlock Style="{StaticResource Text.Caption}"
-                                                               TextTrimming="CharacterEllipsis"
-                                                               Text="{Binding TagsText}"
-                                                               Visibility="{Binding TagsText, Converter={StaticResource NotEmptyVis}}" />
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ListBox.ItemTemplate>
-                                    </ListBox>
-
-                                    <StackPanel VerticalAlignment="Center"
-                                                Visibility="{Binding SavedQueries.Count, Converter={StaticResource ZeroVis}}">
-                                        <TextBlock Style="{StaticResource Glyph.Placeholder}" Text="&#xE74E;" />
-                                        <TextBlock Style="{StaticResource Text.Placeholder}" TextWrapping="Wrap" Margin="12,0"
-                                                   Text="No saved queries yet. Write one, give it a name above the editor, and press Save (Ctrl+S)." />
-                                    </StackPanel>
-                                </Grid>
-                            </DockPanel>
-                        </Border>
-
-                        <GridSplitter Grid.Column="1" Width="10" HorizontalAlignment="Stretch"
-                                      VerticalAlignment="Stretch" />
-
-                    <Grid Grid.Column="2">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" MinHeight="120" />
-                        </Grid.RowDefinitions>
-
-                        <!-- Query editor: name/folder/tags, collection, condition row, statement -->
-                        <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,8">
-                            <StackPanel>
-
-                                <!-- Which saved query this is, and the fields that name and file it. Editing
-                                     Name or Folder and saving renames or moves the same query. -->
-                                <Grid Margin="0,0,0,10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="2*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="1.5*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="1.5*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-
-                                    <TextBlock Grid.ColumnSpan="7" Margin="0,0,0,6"
-                                               Style="{StaticResource Text.Heading}"
-                                               Text="{Binding OpenQueryTitle}" />
-
-                                    <TextBlock Grid.Row="1" Text="Name" Style="{StaticResource Text.Label}" />
-                                    <TextBox Grid.Row="1" Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center"
-                                             AutomationProperties.Name="Query name" Tag="name"
-                                             IsEnabled="{Binding HasQueryOwner}"
-                                             Text="{Binding QueryName, UpdateSourceTrigger=PropertyChanged}" />
-
-                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="Folder" Style="{StaticResource Text.Label}" />
-                                    <TextBox Grid.Row="1" Grid.Column="3" Margin="0,0,12,0" VerticalAlignment="Center"
-                                             AutomationProperties.Name="Query folder" Tag="e.g. fixes/otp"
-                                             IsEnabled="{Binding HasQueryOwner}"
-                                             ToolTip="Folders are separated by / ; empty keeps the query at the top level"
-                                             Text="{Binding QueryFolder, UpdateSourceTrigger=PropertyChanged}" />
-
-                                    <TextBlock Grid.Row="1" Grid.Column="4" Text="Tags" Style="{StaticResource Text.Label}" />
-                                    <TextBox Grid.Row="1" Grid.Column="5" Margin="0,0,12,0" VerticalAlignment="Center"
-                                             AutomationProperties.Name="Query tags" Tag="comma, separated"
-                                             IsEnabled="{Binding HasQueryOwner}"
-                                             Text="{Binding QueryTags, UpdateSourceTrigger=PropertyChanged}" />
-
-                                    <StackPanel Grid.Row="1" Grid.Column="6" Orientation="Horizontal">
-                                        <Button Content="Save" MinWidth="70"
-                                                Command="{Binding SaveQueryCommand}"
-                                                ToolTip="Save this query under its name (Ctrl+S). On an opened query, also saves a new name, folder or tags." />
-                                        <Button Content="Save as new" Margin="6,0,0,0"
-                                                Command="{Binding SaveQueryAsNewCommand}"
-                                                ToolTip="Save a copy as another query, leaving the opened one as it was. A name already taken gets (2)." />
-                                    </StackPanel>
-                                </Grid>
-
-                                <!-- One editor, one statement. The two rows above it only write into it,
-                                     at the caret; nothing is composed or kept anywhere else. -->
-                                <StackPanel DataContext="{Binding QueryEditor}">
-
-                                    <!-- The Query tab's own collection, independent of the Schema explorer's. -->
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" MinWidth="120" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" MinWidth="120" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" MinWidth="120" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-
-                                        <ComboBox Grid.Column="0" ItemsSource="{Binding Picker.Buckets}" Tag="Bucket"
-                                                  AutomationProperties.Name="Query bucket"
-                                                  SelectedItem="{Binding Picker.SelectedBucket}" VerticalAlignment="Center"
-                                                  ToolTip="Bucket" />
-                                        <TextBlock Grid.Column="1" Style="{StaticResource Chevron}" />
-                                        <ComboBox Grid.Column="2" ItemsSource="{Binding Picker.Scopes}" Tag="Scope"
-                                                  AutomationProperties.Name="Query scope"
-                                                  DisplayMemberPath="Name"
-                                                  SelectedItem="{Binding Picker.SelectedScope}" VerticalAlignment="Center"
-                                                  ToolTip="Scope" />
-                                        <TextBlock Grid.Column="3" Style="{StaticResource Chevron}" />
-                                        <ComboBox Grid.Column="4" ItemsSource="{Binding Picker.Collections}" Tag="Collection"
-                                                  AutomationProperties.Name="Query collection"
-                                                  SelectedItem="{Binding Picker.SelectedCollection}" VerticalAlignment="Center"
-                                                  ToolTip="Collection: what Paste collection inserts and what the field list below is sampled from" />
-
-                                        <!-- Not focusable, so the editor keeps the keyboard and its caret. -->
-                                        <Button Grid.Column="5" Content="Paste collection" Margin="10,0,0,0"
-                                                Focusable="False"
-                                                Command="{Binding PasteCollectionCommand}"
-                                                ToolTip="Insert `bucket`.`scope`.`collection` of the picked collection at the caret" />
-                                    </Grid>
-
-                                    <!-- One condition at a time, inserted at the caret. -->
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="120" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-
-                                        <TextBlock Text="WHERE" Style="{StaticResource Text.Label}" />
-                                        <ComboBox Grid.Column="1" AutomationProperties.Name="Condition field" ItemsSource="{Binding Fields}"
-                                                  DisplayMemberPath="Name" Tag="Field"
-                                                  Style="{StaticResource ComboBox.Mono}"
-                                                  SelectedItem="{Binding PendingField}"
-                                                  ToolTip="Fields of the picked collection, from a sample of its documents" />
-                                        <ComboBox Grid.Column="2" Margin="6,0" AutomationProperties.Name="Condition operator"
-                                                  ItemsSource="{Binding Operators}"
-                                                  SelectedItem="{Binding PendingOperator}" />
-                                        <TextBox Grid.Column="3" Style="{StaticResource TextBox.Mono}" AutomationProperties.Name="Condition value"
-                                                 Margin="0,0,6,0" VerticalAlignment="Center"
-                                                 Text="{Binding PendingValue, UpdateSourceTrigger=PropertyChanged}"
-                                                 IsEnabled="{Binding ValueEnabled}"
-                                                 Tag="value, typed bare"
-                                                 ToolTip="Type the value without quotes; Add quotes it the way the field's type needs" />
-                                        <Button Grid.Column="4" Content="Add" MinWidth="58"
-                                                Command="{Binding AddConditionCommand}"
-                                                ToolTip="Insert this condition at the caret: with WHERE when none comes before it, AND after another condition" />
-                                    </Grid>
-
-                                    <Border Style="{StaticResource Card.Flush}" MinHeight="150" MaxHeight="320"
-                                            Background="{DynamicResource Brush.Surface}">
-                                        <ae:TextEditor Style="{StaticResource Editor}"
-                                                       AutomationProperties.Name="Query"
-                                                       ShowLineNumbers="True"
-                                                       v:Editors.Syntax="N1ql"
-                                                       v:Editors.Text="{Binding Statement, Mode=TwoWay,
-                                                                                UpdateSourceTrigger=PropertyChanged}"
-                                                       v:Editors.CaretOffset="{Binding CaretOffset, Mode=TwoWay}" />
-                                    </Border>
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- What will run, and the buttons that run it -->
-                        <Grid Grid.Row="1" Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-
-                            <StackPanel Orientation="Horizontal">
-                                <Button Content="Run query" MinWidth="110"
-                                        Style="{StaticResource Button.Primary}"
-                                        Command="{Binding RunQueryCommand}"
-                                        ToolTip="Run the statement (F5)" />
-                                <Button Content="Cancel" MinWidth="80" Margin="6,0,0,0"
-                                        Style="{StaticResource Button.Danger}"
-                                        Command="{Binding CancelQueryCommand}"
-                                        Visibility="{Binding IsQueryRunning, Converter={StaticResource BoolVis}}" />
-                                <CheckBox Style="{StaticResource Switch}" Margin="14,0,0,0"
-                                          Content="Allow writes"
-                                          IsChecked="{Binding AllowWrites}"
-                                          VerticalAlignment="Center"
-                                          AutomationProperties.Name="Allow writes"
-                                          ToolTip="Off: only reads run, and the server refuses anything that would change data. On: UPDATE, DELETE, INSERT, UPSERT, MERGE and other writes can run, each after a confirmation. Turns itself off on every connect and disconnect." />
-                                <Border Style="{StaticResource Pill}" Margin="10,0,0,0" VerticalAlignment="Center"
-                                        Background="{DynamicResource Brush.DangerSoft}"
-                                        Visibility="{Binding IsCurrentQueryWrite, Converter={StaticResource BoolVis}}"
-                                        ToolTip="This statement changes data (it does not start with SELECT, WITH, EXPLAIN, ADVISE or INFER)">
-                                    <TextBlock Style="{StaticResource Pill.Text}" Text="WRITE"
-                                               Foreground="{DynamicResource Brush.Danger}" />
-                                </Border>
-                            </StackPanel>
-
-                            <Button Grid.Column="2" Style="{StaticResource Button.Small.Icon}"
-                                    Content="&#xE8C8;" Margin="8,0,0,0"
-                                    Command="{Binding CopyStatementCommand}"
-                                    ToolTip="Copy the statement" />
-                        </Grid>
-
-                        <!-- Result -->
-                        <Border Grid.Row="2" Style="{StaticResource Card.Flush}">
-                            <DockPanel>
-                                <Border DockPanel.Dock="Top" Style="{StaticResource CardHeader}">
-                                    <DockPanel>
-                                        <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small.Icon}"
-                                                Content="&#xE8C8;" Margin="6,0,0,0"
-                                                Command="{Binding CopyQueryResultCommand}"
-                                                ToolTip="Copy the JSON" />
-                                        <Border DockPanel.Dock="Right" Style="{StaticResource Pill}"
-                                                Background="{DynamicResource Brush.InfoSoft}"
-                                                Visibility="{Binding QueryResult, Converter={StaticResource NotEmptyVis}}">
-                                            <TextBlock Style="{StaticResource Pill.Text}"
-                                                       Foreground="{DynamicResource Brush.Info}">
-                                                <Run Text="{Binding QueryResultSummary, Mode=OneWay}" />
-                                            </TextBlock>
-                                        </Border>
-                                        <TextBlock Text="Result" Style="{StaticResource Text.Heading}"
-                                                   VerticalAlignment="Center" />
-                                    </DockPanel>
-                                </Border>
-
-                                <Grid>
-                                    <ae:TextEditor Style="{StaticResource Editor}"
-                                                   IsReadOnly="True"
-                                                   ShowLineNumbers="True"
-                                                   v:Editors.Syntax="Json"
-                                                   v:Editors.Text="{Binding QueryResult, Mode=OneWay}" />
-
-                                    <StackPanel VerticalAlignment="Center"
-                                                Visibility="{Binding QueryResult, Converter={StaticResource EmptyVis}}">
-                                        <TextBlock Style="{StaticResource Glyph.Placeholder}" Text="&#xE773;" />
-                                        <TextBlock Style="{StaticResource Text.Placeholder}"
-                                                   Text="Run a query to see its rows here. Ctrl+F searches the result." />
-                                    </StackPanel>
-                                </Grid>
-                            </DockPanel>
-                        </Border>
-                    </Grid>
-                    </Grid>
                 </TabItem>
 
             </TabControl>

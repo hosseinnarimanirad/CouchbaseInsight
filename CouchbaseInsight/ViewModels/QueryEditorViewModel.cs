@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CouchbaseInsight.Models;
@@ -25,6 +26,9 @@ public partial class QueryEditorViewModel : ObservableObject
         _report = report;
         Picker = new KeyspacePickerViewModel(couchbase, buckets, report);
         Picker.PropertyChanged += OnPickerChanged;
+
+        FieldsView = new ListCollectionView(Fields) { Filter = MatchesFieldSearch };
+        FieldsView.SortDescriptions.Add(new SortDescription(nameof(FieldInfo.Name), ListSortDirection.Ascending));
     }
 
     /// <summary>The Query tab's own bucket › scope › collection, independent of the Schema explorer's.</summary>
@@ -47,9 +51,35 @@ public partial class QueryEditorViewModel : ObservableObject
     /// <summary>Top-level and nested fields of the picked collection, from a sample of its documents.</summary>
     public ObservableCollection<FieldInfo> Fields { get; } = new();
 
+    /// <summary>What the field dropdown lists: <see cref="Fields"/> sorted by name, narrowed to the
+    /// names containing <see cref="FieldSearch"/>.</summary>
+    public ICollectionView FieldsView { get; }
+
+    /// <summary>The text typed in the field dropdown.</summary>
+    [ObservableProperty] private string _fieldSearch = "";
+
+    /// <summary>Opens the dropdown while typing narrows it, so the matches show without a click.</summary>
+    [ObservableProperty] private bool _isFieldListOpen;
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(AddConditionCommand))]
     private FieldInfo? _pendingField;
+
+    partial void OnFieldSearchChanged(string value)
+    {
+        // Typing (or picking) a whole name selects that field; anything else is still searching.
+        // Set before the refresh, which reads it.
+        PendingField = Fields.FirstOrDefault(f => string.Equals(f.Name, value.Trim(), StringComparison.OrdinalIgnoreCase));
+        FieldsView.Refresh();
+        IsFieldListOpen = PendingField is null && value.Length > 0 && !FieldsView.IsEmpty;
+    }
+
+    private bool MatchesFieldSearch(object item)
+    {
+        // A picked field shows its full name in the box; that must not hide the rest of the list.
+        if (PendingField is not null || string.IsNullOrWhiteSpace(FieldSearch)) return true;
+        return item is FieldInfo f && f.Name.Contains(FieldSearch.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ValueEnabled))]
@@ -118,6 +148,7 @@ public partial class QueryEditorViewModel : ObservableObject
     {
         Fields.Clear();
         PendingField = null;
+        FieldSearch = "";
         if (Picker.Keyspace.Length == 0) return;
 
         var (bucket, scope, collection) = (Picker.SelectedBucket!, Picker.SelectedScope!.Name, Picker.SelectedCollection!);

@@ -208,8 +208,11 @@ public partial class MainViewModel : ObservableObject
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     }) ?? "";
 
-    /// <summary>The window's tab: 0 Schema explorer, 1 Query.</summary>
-    [ObservableProperty] private int _selectedTabIndex;
+    /// <summary>Tab positions in the window, in XAML order: Query first, the default.</summary>
+    private const int QueryTab = 0;
+
+    /// <summary>The window's tab: <see cref="QueryTab"/> or the Schema explorer.</summary>
+    [ObservableProperty] private int _selectedTabIndex = QueryTab;
 
     /// <summary>The filtered views the window binds to. Same underlying collections as above.</summary>
     public ICollectionView ClassesView { get; }
@@ -1433,7 +1436,7 @@ public partial class MainViewModel : ObservableObject
         QueryEditor.Load($"SELECT META(c).id, c.*\nFROM {ShownKeyspace()} AS c\nUSE KEYS {JsonSerializer.Serialize(key)}");
         if (ShownKeyspaceParts() is { } k)
             _ = QueryEditor.Picker.SelectAsync(k.Bucket, k.Scope, k.Collection);
-        SelectedTabIndex = 1;
+        SelectedTabIndex = QueryTab;
         Report($"Query tab: document '{key}'. Press Run (F5).", StatusKind.Ok);
     }
 
@@ -1758,9 +1761,6 @@ public partial class MainViewModel : ObservableObject
     private void CopyQueryResult() => CopyToClipboard(QueryResult, "Result");
 
     private bool CanCopyQueryResult() => !string.IsNullOrWhiteSpace(QueryResult);
-
-    [RelayCommand]
-    private void CopyStatement() => CopyToClipboard(CurrentStatement, "Statement");
 
     [RelayCommand]
     private void CopyDiagnostics() => CopyToClipboard(Diagnostics, "Diagnostics");
