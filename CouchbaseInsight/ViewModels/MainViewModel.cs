@@ -1524,16 +1524,16 @@ public partial class MainViewModel : ObservableObject
 
     // ---- Query ----
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(QueryPreview))]
+    [NotifyPropertyChangedFor(nameof(QueryPreview), nameof(HasHiddenRawEdits))]
     private string _selectExpression = "*";
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
-    [NotifyPropertyChangedFor(nameof(QueryPreview))]
+    [NotifyPropertyChangedFor(nameof(QueryPreview), nameof(HasHiddenRawEdits))]
     private string _fromKeyspace = "";
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(QueryPreview))]
+    [NotifyPropertyChangedFor(nameof(QueryPreview), nameof(HasHiddenRawEdits))]
     private string _whereClause = "";
 
     [ObservableProperty]
@@ -1551,21 +1551,69 @@ public partial class MainViewModel : ObservableObject
     /// three fields above cannot express — a JOIN, an ORDER BY, a LIMIT, a subquery — lives behind
     /// this switch, and switching it on seeds the editor with whatever the builder had composed so
     /// far rather than with a blank page.
+    ///
+    /// The two modes hold separate statements: a hand-written one cannot be turned back into the
+    /// builder's three fields. So the editor is re-seeded from the builder on every switch-on
+    /// until it is edited by hand; from then on it keeps its own text, switching off asks first
+    /// (Run and Save would use the builder's statement), and a note under the builder says a
+    /// hand-written statement is being kept out of sight.
     /// </summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
-    [NotifyPropertyChangedFor(nameof(QueryPreview))]
+    [NotifyPropertyChangedFor(nameof(QueryPreview), nameof(HasHiddenRawEdits))]
     private bool _isRawQuery;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
-    [NotifyPropertyChangedFor(nameof(QueryPreview))]
+    [NotifyPropertyChangedFor(nameof(QueryPreview), nameof(HasHiddenRawEdits))]
     private string _rawStatement = "";
+
+    /// <summary>The text the editor was last filled with from the builder; null once nothing was.</summary>
+    private string? _rawSeed;
+
+    /// <summary>Set while the switch is put back on after a cancelled switch-off.</summary>
+    private bool _revertingRawSwitch;
+
+    /// <summary>The editor holds text that did not come from the builder (typed, opened, saved).</summary>
+    private bool RawHasOwnText =>
+        !string.IsNullOrWhiteSpace(RawStatement) && RawStatement != _rawSeed;
+
+    /// <summary>Builder mode is showing while a different, hand-written statement waits behind the switch.</summary>
+    public bool HasHiddenRawEdits =>
+        !IsRawQuery && RawHasOwnText && RawStatement.Trim() != ComposedStatement().Trim();
 
     partial void OnIsRawQueryChanged(bool value)
     {
-        if (value && string.IsNullOrWhiteSpace(RawStatement))
-            RawStatement = ComposedStatement();
+        if (_revertingRawSwitch) return;
+
+        if (value)
+        {
+            // Untouched since the last seed (or empty): follow the builder's current statement.
+            if (!RawHasOwnText)
+            {
+                _rawSeed = ComposedStatement();
+                RawStatement = _rawSeed;
+            }
+            return;
+        }
+
+        if (!RawHasOwnText || RawStatement.Trim() == ComposedStatement().Trim()) return;
+
+        var answer = System.Windows.MessageBox.Show(
+            "The SQL++ editor holds a statement the builder cannot show.\n\n" +
+            "In builder mode, Run and Save use the builder's statement instead. The SQL++ text is " +
+            "kept and comes back when you switch Edit as SQL++ on again.\n\nSwitch to the builder?",
+            "Leave Edit as SQL++", System.Windows.MessageBoxButton.OKCancel,
+            System.Windows.MessageBoxImage.Question);
+        if (answer == System.Windows.MessageBoxResult.OK) return;
+
+        // Put the switch back after the binding has finished pushing the unchecked state.
+        System.Windows.Application.Current.Dispatcher.BeginInvoke(() =>
+        {
+            _revertingRawSwitch = true;
+            try { IsRawQuery = true; }
+            finally { _revertingRawSwitch = false; }
+        });
     }
 
     /// <summary>Exactly what Run will send, composed or hand-written.</summary>
@@ -1729,7 +1777,7 @@ public partial class MainViewModel : ObservableObject
             $"{Escape(SelectedBucket!)}.{Escape(SelectedScope!.Name)}.{Escape(SelectedCollection!)}";
 
         if (!string.IsNullOrWhiteSpace(Discriminator) && !string.IsNullOrWhiteSpace(SelectedClass))
-            WhereClause = $"{Escape(Discriminator)} = '{SelectedClass}'";
+            WhereClause = $"{Escape(Discriminator)} = {QuoteString(SelectedClass)}";
         else if (!string.IsNullOrWhiteSpace(Discriminator))
             WhereClause = $"{Escape(Discriminator)} = ''";
 
@@ -1756,7 +1804,7 @@ public partial class MainViewModel : ObservableObject
         var field = Escape(PendingWhereField!.Name);
         var condition = PendingWhereOperator is "IS NULL" or "IS NOT NULL"
             ? $"{field} {PendingWhereOperator}"
-            : $"{field} {PendingWhereOperator} {FormatValue(PendingWhereValue)}";
+            : $"{field} {PendingWhereOperator} {FormatValue(PendingWhereValue, PendingWhereField.Types)}";
 
         WhereClause = string.IsNullOrWhiteSpace(WhereClause)
             ? condition
@@ -1952,16 +2000,38 @@ public partial class MainViewModel : ObservableObject
 
     private static string Escape(string id) => $"`{id.Replace("`", "``")}`";
 
-    private static string FormatValue(string value)
+    /// <summary>
+    /// The builder's value box as a SQL++ literal. The field's sampled JSON types decide: a field
+    /// only ever seen as a string gets a string even for "09121234567" or "true", since an
+    /// unquoted number never equals a string. A value typed in matching quotes ('x' or "x") is
+    /// taken as that string, so typing the quotes does not end up searching for them.
+    /// </summary>
+    private static string FormatValue(string value, string? fieldTypes)
     {
-        if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
-            return value;
-        if (value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("false", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("null", StringComparison.OrdinalIgnoreCase))
-            return value.ToLowerInvariant();
-        return $"'{value}'";
+        var text = value.Trim();
+        if (text.Length >= 2 && (text[0] == '\'' || text[0] == '"') && text[^1] == text[0])
+            return QuoteString(text[1..^1]);
+
+        var types = (fieldTypes ?? "")
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.Ordinal);
+        bool Allows(string type) => types.Count == 0 || types.Contains(type);
+
+        if (Allows("number") &&
+            double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) &&
+            double.IsFinite(number))
+            return text;
+
+        var lower = text.ToLowerInvariant();
+        if (lower is "true" or "false" && Allows("boolean")) return lower;
+        if (lower is "null" && Allows("null")) return lower;
+        return QuoteString(value);
     }
+
+    /// <summary>A single-quoted SQL++ string: backslashes (escape characters in SQL++ strings) and
+    /// single quotes doubled.</summary>
+    private static string QuoteString(string value) =>
+        $"'{value.Replace("\\", "\\\\").Replace("'", "''")}'";
 
     private void Report(string message, StatusKind level)
     {

@@ -91,7 +91,14 @@ read — are pills in the pane header. Clicking a field lists its most frequent 
 
 **Query.** The builder composes `SELECT … FROM … WHERE …` and shows the exact statement it will
 send; *Edit as SQL++* hands that statement to a free-text editor for everything the builder cannot
-express (JOIN, ORDER BY, LIMIT, subqueries). The clause editor and the result pane are both
+express (JOIN, ORDER BY, LIMIT, subqueries). In the condition row, type the value bare: *Add*
+quotes it from the field's sampled types, so a field only seen as a string gets `'09121234567'`
+rather than a number that never matches it; a value typed in quotes (`'x'` or `"x"`) is taken
+as that string, and `'` and `\` inside it are escaped. The builder and the SQL++ editor keep
+separate statements: switching *Edit as SQL++* on re-fills the editor from the builder until the
+editor is edited by hand (or holds an opened or saved query); after that it keeps its own text,
+switching back to the builder asks first, since Run and Save then use the builder's statement,
+and a note under the builder says another statement is waiting. The clause editor and the result pane are both
 syntax-highlighted, and Ctrl+F searches a result. **F5** or **Ctrl+Enter** runs the query; a
 running one can be cancelled. The pill over the result gives the server's own numbers: rows and
 elapsed time for a read, documents changed for a write.

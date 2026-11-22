@@ -1105,6 +1105,13 @@
                                                                                 UpdateSourceTrigger=PropertyChanged}"
                                                        ToolTip="Built by the row above, or typed here directly" />
                                     </Border>
+
+                                    <!-- The two modes hold separate statements: say so when a different,
+                                         hand-written one is waiting behind the Edit as SQL++ switch. -->
+                                    <TextBlock Style="{StaticResource Text.Caption}" Margin="2,6,0,0"
+                                               Foreground="{DynamicResource Brush.Warn}" TextWrapping="Wrap"
+                                               Visibility="{Binding HasHiddenRawEdits, Converter={StaticResource BoolVis}}"
+                                               Text="A different hand-written SQL++ statement is kept behind Edit as SQL++. Run and Save use the builder's statement shown here; switch Edit as SQL++ on to get the other one back." />
                                 </StackPanel>
 
                                 <!-- Raw mode: the whole statement, by hand. -->
