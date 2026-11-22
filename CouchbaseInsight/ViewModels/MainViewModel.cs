@@ -3,7 +3,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Windows.Data;
@@ -202,11 +201,7 @@ public partial class MainViewModel : ObservableObject
         SelectedSampleDocument = SampleDocuments.FirstOrDefault();
     }
 
-    private static string PrettyJson(JsonNode? doc) => doc?.ToJsonString(new JsonSerializerOptions
-    {
-        WriteIndented = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    }) ?? "";
+    private static string PrettyJson(JsonNode? doc) => doc?.ToJsonString(JsonText.Readable) ?? "";
 
     /// <summary>Tab positions in the window, in XAML order: Query first, the default.</summary>
     private const int QueryTab = 0;
@@ -1110,12 +1105,8 @@ public partial class MainViewModel : ObservableObject
 
         try
         {
-            var json = report.ToJsonString(new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                // Persian class names and values stay readable instead of \uXXXX escapes.
-                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-            });
+            // Persian class names and values stay readable instead of \uXXXX escapes.
+            var json = report.ToJsonString(JsonText.Readable);
             await File.WriteAllTextAsync(dialog.FileName, json);
             Report($"Saved {Long(report["classCount"]):N0} class(es), {Long(report["documentsRead"]):N0} documents, " +
                    $"to {dialog.FileName}", StatusKind.Ok);
@@ -1391,19 +1382,14 @@ public partial class MainViewModel : ObservableObject
     private void ShowSampleDocuments(JsonObject cls)
     {
         SampleDocuments.Clear();
-        static string Pretty(JsonNode? doc) => doc?.ToJsonString(new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        }) ?? "";
 
         if (cls["sampleDocuments"] is JsonArray docs)
             foreach (var d in docs.OfType<JsonObject>())
-                SampleDocuments.Add(new SampleDocumentItem(d["key"]?.ToString() ?? "", Pretty(d["doc"])));
+                SampleDocuments.Add(new SampleDocumentItem(d["key"]?.ToString() ?? "", PrettyJson(d["doc"])));
         else if (cls["samples"] is JsonObject samples)
             foreach (var which in new[] { "oldest", "newest" })
                 if (samples[which] is JsonObject d && d["key"] is not null)
-                    SampleDocuments.Add(new SampleDocumentItem(d["key"]!.ToString(), Pretty(d["doc"]), which));
+                    SampleDocuments.Add(new SampleDocumentItem(d["key"]!.ToString(), PrettyJson(d["doc"]), which));
 
         var shapes = cls["keyPatterns"] is JsonArray kp && kp.Count > 0
             ? " · keys " + string.Join(", ", kp.OfType<JsonObject>().Take(3).Select(k => $"{k["pattern"]}"))

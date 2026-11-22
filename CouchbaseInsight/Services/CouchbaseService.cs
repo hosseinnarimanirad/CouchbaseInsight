@@ -421,7 +421,8 @@ public class CouchbaseService : ICouchbaseService
 
         // Complete only once the rows have been read.
         var metrics = result.MetaData?.Metrics;
-        var json = JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true });
+        // Readable: Persian names and other non-ASCII text as they are, not \uXXXX escapes.
+        var json = JsonSerializer.Serialize(rows, JsonText.Readable);
         return new QueryOutcome(rows.Count, json, metrics?.MutationCount, metrics?.ElapsedTime);
     }
 
