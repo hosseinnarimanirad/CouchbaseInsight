@@ -58,16 +58,13 @@ public partial class MainViewModel
     public string OpenQueryTitle =>
         (_openQuery?.Path ?? "Untitled query") + (IsQueryDirty ? "  •" : "");
 
-    /// <summary>The statement Save would store: the hand-written one, or what the builder composes.</summary>
-    private string CurrentStatement => IsRawQuery ? RawStatement : ComposedStatement();
-
     /// <summary>Whether the editor or the name/folder/tags row differs from what was opened or last saved.</summary>
     public bool IsQueryDirty
     {
         get
         {
             if (_openQuery is null)
-                return !string.IsNullOrWhiteSpace(QueryName) || (IsRawQuery && !string.IsNullOrWhiteSpace(RawStatement));
+                return !string.IsNullOrWhiteSpace(QueryName) || QueryEditor.HasOwnText;
 
             return !string.Equals(CurrentStatement, _openQuery.Statement, StringComparison.Ordinal) ||
                    !string.Equals(QueryName.Trim(), _openQuery.Name, StringComparison.Ordinal) ||
@@ -99,11 +96,11 @@ public partial class MainViewModel
 
     partial void OnSavedQueryFilterChanged(string value) => SavedQueriesView.Refresh();
 
-    // Anything that changes what Save would store changes the dirty mark and the title.
+    // Anything that changes what Save would store changes the dirty mark and the title. The
+    // statement itself lives on QueryEditor, which reports its changes through OnQueryEditorChanged.
     private static readonly HashSet<string> QueryEditProperties =
     [
-        nameof(RawStatement), nameof(IsRawQuery), nameof(SelectExpression), nameof(FromKeyspace),
-        nameof(WhereClause), nameof(QueryName), nameof(QueryFolder), nameof(QueryTags)
+        nameof(QueryName), nameof(QueryFolder), nameof(QueryTags)
     ];
 
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
@@ -177,8 +174,7 @@ public partial class MainViewModel
     private void OpenSavedQuery(SavedQuery query)
     {
         _openQuery = query.Clone();
-        IsRawQuery = true;
-        RawStatement = query.Statement;
+        QueryEditor.Load(query.Statement);
         QueryName = query.Name;
         QueryFolder = query.Folder;
         QueryTags = string.Join(", ", query.Tags);
@@ -220,8 +216,7 @@ public partial class MainViewModel
         QueryName = "";
         QueryTags = "";
         // Keep the folder: a new query usually goes next to the one just worked on.
-        IsRawQuery = true;
-        RawStatement = "";
+        QueryEditor.StartNew();
         SelectSavedQuerySilently(null);
         OnQueryEditStateChanged();
     }
@@ -268,14 +263,6 @@ public partial class MainViewModel
         {
             Report($"Not saved: {ex.Message}", StatusKind.Error);
             return false;
-        }
-
-        // A query saved from the builder is a hand-written one from now on, so what the editor
-        // shows is exactly what was stored.
-        if (!IsRawQuery)
-        {
-            IsRawQuery = true;
-            RawStatement = stored.Statement;
         }
 
         _openQuery = stored;

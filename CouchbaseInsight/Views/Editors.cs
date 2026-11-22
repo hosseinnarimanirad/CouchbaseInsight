@@ -99,6 +99,7 @@ public static class Editors
 
     private static void Hook(TextEditor editor)
     {
+        HookCaret(editor);
         if (!Hooked.Add(editor)) return;
 
         editor.TextChanged += (_, _) =>
@@ -110,6 +111,52 @@ public static class Editors
             Syncing.Add(editor);
             try { SetText(editor, editor.Document.Text); }
             finally { Syncing.Remove(editor); }
+        };
+    }
+
+    // ---- CaretOffset: a two-way binding target, so a view model can insert at the caret ----
+
+    public static readonly DependencyProperty CaretOffsetProperty = DependencyProperty.RegisterAttached(
+        "CaretOffset", typeof(int), typeof(Editors),
+        new FrameworkPropertyMetadata(
+            0,
+            FrameworkPropertyMetadataOptions.BindsTwoWayByDefault,
+            OnCaretOffsetChanged));
+
+    public static void SetCaretOffset(DependencyObject element, int value) =>
+        element.SetValue(CaretOffsetProperty, value);
+
+    public static int GetCaretOffset(DependencyObject element) =>
+        (int)element.GetValue(CaretOffsetProperty);
+
+    // Kept apart from Syncing: setting the text moves the caret, and that move must still reach
+    // the binding, or the view model's caret goes stale.
+    private static readonly HashSet<TextEditor> CaretSyncing = [];
+    private static readonly HashSet<TextEditor> CaretHooked = [];
+
+    private static void OnCaretOffsetChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is not TextEditor editor) return;
+
+        HookCaret(editor);
+        if (CaretSyncing.Contains(editor)) return;
+        CaretSyncing.Add(editor);
+        try { editor.CaretOffset = Math.Clamp((int)e.NewValue, 0, editor.Document.TextLength); }
+        finally { CaretSyncing.Remove(editor); }
+    }
+
+    /// <summary>Caret moves go to the binding. Hooked with the text (see <see cref="Hook"/>) rather
+    /// than on the first CaretOffset change, which never comes while the bound value stays 0.</summary>
+    private static void HookCaret(TextEditor editor)
+    {
+        if (!CaretHooked.Add(editor)) return;
+
+        editor.TextArea.Caret.PositionChanged += (_, _) =>
+        {
+            if (CaretSyncing.Contains(editor)) return;
+            CaretSyncing.Add(editor);
+            try { editor.SetCurrentValue(CaretOffsetProperty, editor.CaretOffset); }
+            finally { CaretSyncing.Remove(editor); }
         };
     }
 

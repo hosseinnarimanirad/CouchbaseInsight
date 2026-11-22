@@ -431,10 +431,9 @@ public class CouchbaseService : ICouchbaseService
         _cluster ?? throw new InvalidOperationException("Not connected to a cluster.");
 
     private static string Keyspace(string bucket, string scope, string collection) =>
-        $"{EscapeIdentifier(bucket)}.{EscapeIdentifier(scope)}.{EscapeIdentifier(collection)}";
+        SqlText.Keyspace(bucket, scope, collection);
 
-    private static string EscapeIdentifier(string identifier) =>
-        $"`{identifier.Replace("`", "``")}`";
+    private static string EscapeIdentifier(string identifier) => SqlText.Identifier(identifier);
 
     /// <summary>Converts a dotted field path like "address.city" to c.`address`.`city`.</summary>
     private static string NestedFieldExpr(string alias, string dottedPath) =>

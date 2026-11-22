@@ -34,8 +34,8 @@ public partial class MainViewModel
 
     /// <summary>Whether what Run would send now is a write; drives the badge beside Run.</summary>
     public bool IsCurrentQueryWrite =>
-        !string.IsNullOrWhiteSpace(QueryPreview) &&
-        StatementClassifier.Classify(QueryPreview) == QueryKind.Write;
+        !string.IsNullOrWhiteSpace(CurrentStatement) &&
+        StatementClassifier.Classify(CurrentStatement) == QueryKind.Write;
 
     partial void OnIsConnectedChanged(bool value) => AllowWrites = false;
 

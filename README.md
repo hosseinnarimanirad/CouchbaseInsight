@@ -6,16 +6,19 @@ a switch and a confirmation.
 
 ## The window
 
-The app draws its own title bar. It carries the wordmark, a status chip naming the cluster and
-bucket you are attached to, the toggle for the connection form, and the theme switch.
+The app draws its own title bar. It carries the wordmark, a status chip naming the cluster you
+are attached to, the toggle for the connection form, and the theme switch. Below the connection
+form sit two tabs, **Schema explorer** and **Query**, each with its own collection picker: the
+two are unrelated jobs, so picking a collection in one never changes the other.
 
 **Connecting.** The connection form is open on launch and folds itself away on a successful
 connect — after that it is a screenful of details nobody reads again that session. The
 *Connection* button in the title bar brings it back; a failed connect brings it back on its own,
 with the diagnostics report underneath it.
 
-**Choosing what to look at.** Bucket, scope, collection and discriminator sit on one row below,
-in that order, because each one is only answerable once the one before it is.
+**Choosing what to look at.** At the top of the Schema explorer tab, bucket, scope, collection
+and discriminator sit on one row, in that order, because each one is only answerable once the one
+before it is.
 
 **Load (two steps).** *Load* counts every class over the whole collection on the server, range by
 range (several at once), and downloads no document: the class list shows exact counts and %.
@@ -89,24 +92,30 @@ case or was seen as more than one type. The headline numbers — fields, require
 read — are pills in the pane header. Clicking a field lists its most frequent values with counts.
 
 
-**Query.** The builder composes `SELECT … FROM … WHERE …` and shows the exact statement it will
-send; *Edit as SQL++* hands that statement to a free-text editor for everything the builder cannot
-express (JOIN, ORDER BY, LIMIT, subqueries). In the condition row, type the value bare: *Add*
-quotes it from the field's sampled types, so a field only seen as a string gets `'09121234567'`
-rather than a number that never matches it; a value typed in quotes (`'x'` or `"x"`) is taken
-as that string, and `'` and `\` inside it are escaped. The builder and the SQL++ editor keep
-separate statements: switching *Edit as SQL++* on re-fills the editor from the builder until the
-editor is edited by hand (or holds an opened or saved query); after that it keeps its own text,
-switching back to the builder asks first, since Run and Save then use the builder's statement,
-and a note under the builder says another statement is waiting. The clause editor and the result pane are both
-syntax-highlighted, and Ctrl+F searches a result. **F5** or **Ctrl+Enter** runs the query; a
+**Query.** One SQL++ editor holds the whole statement, and it is exactly what Run sends and Save
+stores. Two rows above it only write into it, at the caret:
+- **The Query tab's own picker** (bucket › scope › collection, starting on the same default as the
+  Schema explorer's after a connect, then independent). *Paste collection* inserts its
+  `` `bucket`.`scope`.`collection` ``; picking a collection also lists its fields, from a sample of
+  500 documents, for the condition row.
+- **The condition row** (field, operator, value, *Add*). Type the value bare: *Add* quotes it from
+  the field's sampled types, so a field only seen as a string gets `'09121234567'` rather than a
+  number that never matches it; a value typed in quotes (`'x'` or `"x"`) is taken as that string,
+  and `'` and `\` inside it are escaped. Nested fields come out as `` `address`.`city` ``. The
+  condition goes in with `WHERE` when no WHERE comes before the caret, bare right after `WHERE`,
+  `AND`, `OR`, `NOT` or `(`, and with `AND` after anything else.
+
+*New* starts `SELECT META(c).id, c.* FROM <picked collection> AS c WHERE ` with the caret at the
+end; left untouched it does not count as unsaved work. *Open in Query tab* (Schema explorer) puts a
+by-key statement in the editor and points the Query picker at the same collection. The editor and
+the result pane are both syntax-highlighted, and Ctrl+F searches a result. **F5** or **Ctrl+Enter** runs the query; a
 running one can be cancelled. The pill over the result gives the server's own numbers: rows and
 elapsed time for a read, documents changed for a write.
 
 **Saved queries.** The pane on the left of the Query tab lists the queries saved for the connection
 picked in the connection form, grouped by folder; the filter box matches name, folder, tag or
 statement text. They can be browsed and edited without a connection; only running needs one.
-Clicking a query opens it in the SQL++ editor. The row above the editor names it: *Name*, *Folder*
+Clicking a query opens it in the editor. The row above the editor names it: *Name*, *Folder*
 (`fixes/otp`; `/` separates levels) and *Tags* (comma-separated). **Save** (Ctrl+S) writes the
 query back under the same identity, so changing its name or folder and saving renames or moves it;
 *Save as new* makes a copy, adding "(2)" when the name is taken. A `•` after the title marks unsaved

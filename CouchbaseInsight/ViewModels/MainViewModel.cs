@@ -38,6 +38,8 @@ public partial class MainViewModel : ObservableObject
     {
         _couchbase = couchbase;
         _store = store;
+        QueryEditor = new QueryEditorViewModel(couchbase, Buckets, Report);
+        QueryEditor.PropertyChanged += OnQueryEditorChanged;
         // Before a connection is selected below: selecting one lists its saved queries.
         InitSavedQueries(queryStore);
 
@@ -111,7 +113,6 @@ public partial class MainViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(LoadClassesCommand))]
     [NotifyCanExecuteChangedFor(nameof(DeepLoadCommand))]
     [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
-    [NotifyCanExecuteChangedFor(nameof(SyncFromSelectionCommand))]
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
     [NotifyCanExecuteChangedFor(nameof(AnalyzeSelectedCommand))]
     [NotifyCanExecuteChangedFor(nameof(AnalyzeFieldCommand))]
@@ -139,7 +140,6 @@ public partial class MainViewModel : ObservableObject
     public ObservableCollection<string> DiscriminatorFields { get; } = new();
     public ObservableCollection<ClassEntry> Classes { get; } = new();
     public ObservableCollection<FieldInfo> Fields { get; } = new();
-    public ObservableCollection<FieldInfo> QueryFields { get; } = new();
     public ObservableCollection<DistinctValueItem> DistinctValues { get; } = new();
 
     /// <summary>The documents of the selected class's sample (or a Deep load's oldest/newest).</summary>
@@ -226,17 +226,14 @@ public partial class MainViewModel : ObservableObject
         (candidate?.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase) ?? false);
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(SyncFromSelectionCommand))]
     private string? _selectedBucket;
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(SyncFromSelectionCommand))]
     private ScopeInfo? _selectedScope;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(LoadClassesCommand))]
     [NotifyCanExecuteChangedFor(nameof(DeepLoadCommand))]
-    [NotifyCanExecuteChangedFor(nameof(SyncFromSelectionCommand))]
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
     private string? _selectedCollection;
 
@@ -1412,24 +1409,30 @@ public partial class MainViewModel : ObservableObject
         SelectedSampleDocument = SampleDocuments.FirstOrDefault();
     }
 
-    /// <summary>The keyspace of what is on screen, escaped for a statement.</summary>
     /// <summary>The keyspace of the documents on screen: the loaded or opened summary's, or, before
-    /// any Load (the collection preview), the bucket, scope and collection picked at the top.</summary>
-    private string ShownKeyspace()
+    /// any Load (the collection preview), the bucket, scope and collection picked in the Schema
+    /// explorer. Null while any part is missing.</summary>
+    private (string Bucket, string Scope, string Collection)? ShownKeyspaceParts()
     {
         var (bucket, scope, collection) = _report is not null
             ? (_report["bucket"]?.ToString(), _report["scope"]?.ToString(), _report["collection"]?.ToString())
             : (SelectedBucket, SelectedScope?.Name, SelectedCollection);
         return string.IsNullOrEmpty(bucket) || string.IsNullOrEmpty(scope) || string.IsNullOrEmpty(collection)
-            ? ""
-            : $"{Escape(bucket)}.{Escape(scope)}.{Escape(collection)}";
+            ? null
+            : (bucket, scope, collection);
     }
 
-    /// <summary>Puts a by-key statement for the document in the Query tab and switches to it.</summary>
+    /// <summary>The same, escaped for a statement; empty while any part is missing.</summary>
+    private string ShownKeyspace() =>
+        ShownKeyspaceParts() is { } k ? SqlText.Keyspace(k.Bucket, k.Scope, k.Collection) : "";
+
+    /// <summary>Puts a by-key statement for the document in the Query tab, points the Query tab's
+    /// picker at the same collection (so its field list matches), and switches to it.</summary>
     private void OpenInQuery(string key)
     {
-        IsRawQuery = true;
-        RawStatement = $"SELECT META(c).id, c.*\nFROM {ShownKeyspace()} AS c\nUSE KEYS {JsonSerializer.Serialize(key)}";
+        QueryEditor.Load($"SELECT META(c).id, c.*\nFROM {ShownKeyspace()} AS c\nUSE KEYS {JsonSerializer.Serialize(key)}");
+        if (ShownKeyspaceParts() is { } k)
+            _ = QueryEditor.Picker.SelectAsync(k.Bucket, k.Scope, k.Collection);
         SelectedTabIndex = 1;
         Report($"Query tab: document '{key}'. Press Run (F5).", StatusKind.Ok);
     }
@@ -1523,18 +1526,12 @@ public partial class MainViewModel : ObservableObject
     partial void OnFieldCountChanged(int value) => OnPropertyChanged(nameof(HasSchema));
 
     // ---- Query ----
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(QueryPreview), nameof(HasHiddenRawEdits))]
-    private string _selectExpression = "*";
 
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
-    [NotifyPropertyChangedFor(nameof(QueryPreview), nameof(HasHiddenRawEdits))]
-    private string _fromKeyspace = "";
+    /// <summary>The Query tab's editor and its own collection picker.</summary>
+    public QueryEditorViewModel QueryEditor { get; }
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(QueryPreview), nameof(HasHiddenRawEdits))]
-    private string _whereClause = "";
+    /// <summary>The statement Run sends and Save stores: the editor's text, as it is.</summary>
+    private string CurrentStatement => QueryEditor.Statement;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(CopyQueryResultCommand))]
@@ -1546,102 +1543,13 @@ public partial class MainViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(CancelQueryCommand))]
     private bool _isQueryRunning;
 
-    /// <summary>
-    /// The builder writes a statement; this hands it over to be edited by hand. Everything the
-    /// three fields above cannot express — a JOIN, an ORDER BY, a LIMIT, a subquery — lives behind
-    /// this switch, and switching it on seeds the editor with whatever the builder had composed so
-    /// far rather than with a blank page.
-    ///
-    /// The two modes hold separate statements: a hand-written one cannot be turned back into the
-    /// builder's three fields. So the editor is re-seeded from the builder on every switch-on
-    /// until it is edited by hand; from then on it keeps its own text, switching off asks first
-    /// (Run and Save would use the builder's statement), and a note under the builder says a
-    /// hand-written statement is being kept out of sight.
-    /// </summary>
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
-    [NotifyPropertyChangedFor(nameof(QueryPreview), nameof(HasHiddenRawEdits))]
-    private bool _isRawQuery;
-
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(RunQueryCommand))]
-    [NotifyPropertyChangedFor(nameof(QueryPreview), nameof(HasHiddenRawEdits))]
-    private string _rawStatement = "";
-
-    /// <summary>The text the editor was last filled with from the builder; null once nothing was.</summary>
-    private string? _rawSeed;
-
-    /// <summary>Set while the switch is put back on after a cancelled switch-off.</summary>
-    private bool _revertingRawSwitch;
-
-    /// <summary>The editor holds text that did not come from the builder (typed, opened, saved).</summary>
-    private bool RawHasOwnText =>
-        !string.IsNullOrWhiteSpace(RawStatement) && RawStatement != _rawSeed;
-
-    /// <summary>Builder mode is showing while a different, hand-written statement waits behind the switch.</summary>
-    public bool HasHiddenRawEdits =>
-        !IsRawQuery && RawHasOwnText && RawStatement.Trim() != ComposedStatement().Trim();
-
-    partial void OnIsRawQueryChanged(bool value)
-    {
-        if (_revertingRawSwitch) return;
-
-        if (value)
-        {
-            // Untouched since the last seed (or empty): follow the builder's current statement.
-            if (!RawHasOwnText)
-            {
-                _rawSeed = ComposedStatement();
-                RawStatement = _rawSeed;
-            }
-            return;
-        }
-
-        if (!RawHasOwnText || RawStatement.Trim() == ComposedStatement().Trim()) return;
-
-        var answer = System.Windows.MessageBox.Show(
-            "The SQL++ editor holds a statement the builder cannot show.\n\n" +
-            "In builder mode, Run and Save use the builder's statement instead. The SQL++ text is " +
-            "kept and comes back when you switch Edit as SQL++ on again.\n\nSwitch to the builder?",
-            "Leave Edit as SQL++", System.Windows.MessageBoxButton.OKCancel,
-            System.Windows.MessageBoxImage.Question);
-        if (answer == System.Windows.MessageBoxResult.OK) return;
-
-        // Put the switch back after the binding has finished pushing the unchecked state.
-        System.Windows.Application.Current.Dispatcher.BeginInvoke(() =>
-        {
-            _revertingRawSwitch = true;
-            try { IsRawQuery = true; }
-            finally { _revertingRawSwitch = false; }
-        });
-    }
-
-    /// <summary>Exactly what Run will send, composed or hand-written.</summary>
-    public string QueryPreview => IsRawQuery ? RawStatement : ComposedStatement();
-
     private CancellationTokenSource? _queryCts;
 
-    // WHERE clause builder
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(AddWhereConditionCommand))]
-    private FieldInfo? _pendingWhereField;
-
-    [ObservableProperty] private string _pendingWhereOperator = "=";
-
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(AddWhereConditionCommand))]
-    private string _pendingWhereValue = "";
-
-    public IReadOnlyList<string> WhereOperators { get; } =
-        ["=", "!=", "<", "<=", ">", ">=", "LIKE", "IS NULL", "IS NOT NULL"];
-
-    public bool WhereValueEnabled =>
-        PendingWhereOperator is not "IS NULL" and not "IS NOT NULL";
-
-    partial void OnPendingWhereOperatorChanged(string value)
+    private void OnQueryEditorChanged(object? sender, PropertyChangedEventArgs e)
     {
-        OnPropertyChanged(nameof(WhereValueEnabled));
-        AddWhereConditionCommand.NotifyCanExecuteChanged();
+        if (e.PropertyName != nameof(QueryEditorViewModel.Statement)) return;
+        RunQueryCommand.NotifyCanExecuteChanged();
+        OnQueryEditStateChanged();
     }
 
     // ---- Commands ----
@@ -1749,7 +1657,11 @@ public partial class MainViewModel : ObservableObject
         // after the connect has finished, because a selection made while it is still running
         // would find the window busy and load nothing.
         else if (SelectedBucket is null && Buckets.Count > 0)
+        {
             SelectedBucket = Buckets[0];
+            // The Query tab starts on the same default, then goes its own way.
+            QueryEditor.Picker.SelectedBucket ??= Buckets[0];
+        }
     }
 
     private bool CanConnect() => !IsBusy && !string.IsNullOrWhiteSpace(ConnectionString);
@@ -1770,57 +1682,6 @@ public partial class MainViewModel : ObservableObject
 
     private bool CanDisconnect() => IsConnected && !IsBusy;
 
-    [RelayCommand(CanExecute = nameof(CanSyncFromSelection))]
-    private async Task SyncFromSelectionAsync()
-    {
-        FromKeyspace =
-            $"{Escape(SelectedBucket!)}.{Escape(SelectedScope!.Name)}.{Escape(SelectedCollection!)}";
-
-        if (!string.IsNullOrWhiteSpace(Discriminator) && !string.IsNullOrWhiteSpace(SelectedClass))
-            WhereClause = $"{Escape(Discriminator)} = {QuoteString(SelectedClass)}";
-        else if (!string.IsNullOrWhiteSpace(Discriminator))
-            WhereClause = $"{Escape(Discriminator)} = ''";
-
-        await RunGuarded("Loading fields…", async () =>
-        {
-            QueryFields.Clear();
-            PendingWhereField = null;
-            var fields = await _couchbase.GetCollectionFieldsAsync(
-                SelectedBucket!, SelectedScope!.Name, SelectedCollection!);
-            foreach (var f in fields) QueryFields.Add(f);
-            Report($"Synced — {QueryFields.Count} field(s) discovered.", StatusKind.Ok);
-        });
-    }
-
-    private bool CanSyncFromSelection() =>
-        IsConnected &&
-        SelectedBucket is not null &&
-        SelectedScope is not null &&
-        !string.IsNullOrWhiteSpace(SelectedCollection);
-
-    [RelayCommand(CanExecute = nameof(CanAddWhereCondition))]
-    private void AddWhereCondition()
-    {
-        var field = Escape(PendingWhereField!.Name);
-        var condition = PendingWhereOperator is "IS NULL" or "IS NOT NULL"
-            ? $"{field} {PendingWhereOperator}"
-            : $"{field} {PendingWhereOperator} {FormatValue(PendingWhereValue, PendingWhereField.Types)}";
-
-        WhereClause = string.IsNullOrWhiteSpace(WhereClause)
-            ? condition
-            : $"{WhereClause}\n  AND {condition}";
-
-        PendingWhereValue = "";
-    }
-
-    private bool CanAddWhereCondition() =>
-        PendingWhereField is not null &&
-        (PendingWhereOperator is "IS NULL" or "IS NOT NULL" ||
-         !string.IsNullOrWhiteSpace(PendingWhereValue));
-
-    [RelayCommand]
-    private void ClearWhere() => WhereClause = "";
-
     /// <summary>
     /// F5. A read runs at once, with the server's read-only flag on. A write runs only while
     /// <see cref="AllowWrites"/> is on, and then only after the confirm card (see
@@ -1829,7 +1690,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanRunQuery))]
     private async Task RunQueryAsync()
     {
-        var statement = QueryPreview;
+        var statement = CurrentStatement;
         if (StatementClassifier.Classify(statement) == QueryKind.Read)
         {
             await ExecuteQueryAsync(statement, readOnly: true);
@@ -1886,7 +1747,7 @@ public partial class MainViewModel : ObservableObject
 
     private bool CanRunQuery() =>
         IsConnected && !IsBusy && !IsWriteConfirmVisible &&
-        !string.IsNullOrWhiteSpace(IsRawQuery ? RawStatement : FromKeyspace);
+        !string.IsNullOrWhiteSpace(CurrentStatement);
 
     [RelayCommand(CanExecute = nameof(CanCancelQuery))]
     private void CancelQuery() => _queryCts?.Cancel();
@@ -1899,7 +1760,7 @@ public partial class MainViewModel : ObservableObject
     private bool CanCopyQueryResult() => !string.IsNullOrWhiteSpace(QueryResult);
 
     [RelayCommand]
-    private void CopyStatement() => CopyToClipboard(QueryPreview, "Statement");
+    private void CopyStatement() => CopyToClipboard(CurrentStatement, "Statement");
 
     [RelayCommand]
     private void CopyDiagnostics() => CopyToClipboard(Diagnostics, "Diagnostics");
@@ -1907,14 +1768,6 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void CopyDistinctValues() =>
         CopyToClipboard(string.Join(Environment.NewLine, DistinctValues.Select(v => v.ToString())), "Values");
-
-    private string ComposedStatement()
-    {
-        var sql = $"SELECT {SelectExpression} FROM {FromKeyspace}";
-        if (!string.IsNullOrWhiteSpace(WhereClause))
-            sql += $"\nWHERE {WhereClause.Trim()}";
-        return sql;
-    }
 
     // ---- Selection reactions ----
 
@@ -1938,7 +1791,6 @@ public partial class MainViewModel : ObservableObject
             // The first scope of the bucket, passing over Couchbase's own _default and _system
             // when the bucket has scopes of its own: those are the ones worth looking at.
             SelectedScope = Scopes.FirstOrDefault(sc => !sc.Name.StartsWith('_')) ?? Scopes.FirstOrDefault();
-            ConnectionSummary = DescribeTarget();
             Report($"{Scopes.Count} scope(s) in '{value}'.", StatusKind.Ok);
         });
     }
@@ -1998,40 +1850,7 @@ public partial class MainViewModel : ObservableObject
 
     // ---- Helpers ----
 
-    private static string Escape(string id) => $"`{id.Replace("`", "``")}`";
-
-    /// <summary>
-    /// The builder's value box as a SQL++ literal. The field's sampled JSON types decide: a field
-    /// only ever seen as a string gets a string even for "09121234567" or "true", since an
-    /// unquoted number never equals a string. A value typed in matching quotes ('x' or "x") is
-    /// taken as that string, so typing the quotes does not end up searching for them.
-    /// </summary>
-    private static string FormatValue(string value, string? fieldTypes)
-    {
-        var text = value.Trim();
-        if (text.Length >= 2 && (text[0] == '\'' || text[0] == '"') && text[^1] == text[0])
-            return QuoteString(text[1..^1]);
-
-        var types = (fieldTypes ?? "")
-            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .ToHashSet(StringComparer.Ordinal);
-        bool Allows(string type) => types.Count == 0 || types.Contains(type);
-
-        if (Allows("number") &&
-            double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) &&
-            double.IsFinite(number))
-            return text;
-
-        var lower = text.ToLowerInvariant();
-        if (lower is "true" or "false" && Allows("boolean")) return lower;
-        if (lower is "null" && Allows("null")) return lower;
-        return QuoteString(value);
-    }
-
-    /// <summary>A single-quoted SQL++ string: backslashes (escape characters in SQL++ strings) and
-    /// single quotes doubled.</summary>
-    private static string QuoteString(string value) =>
-        $"'{value.Replace("\\", "\\\\").Replace("'", "''")}'";
+    private static string Escape(string id) => SqlText.Identifier(id);
 
     private void Report(string message, StatusKind level)
     {
@@ -2054,17 +1873,14 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>Host and bucket for the title bar, from the connection string the SDK was given.</summary>
+    /// <summary>The cluster for the title bar, from the connection string the SDK was given. No
+    /// bucket: the Schema explorer and the Query tab each pick their own.</summary>
     private string DescribeTarget()
     {
         var seeds = ConnectionStringInspector.Inspect(ConnectionString).Seeds;
         var host = seeds.Count > 0 ? seeds[0].Host : ConnectionString;
         var extra = seeds.Count > 1 ? $" +{seeds.Count - 1}" : "";
-        var scope = SelectedBucket is null
-            ? $"{Buckets.Count} bucket(s)"
-            : SelectedBucket;
-
-        return $"{host}{extra} · {scope}";
+        return $"{host}{extra}";
     }
 
     private void ClearSchema()
@@ -2102,6 +1918,7 @@ public partial class MainViewModel : ObservableObject
         SelectedCollection = null;
         SelectedClassEntry = null;
         ClassesCaption = "";
+        QueryEditor.Picker.Reset();
     }
 
     private Task RunGuarded(string busyMessage, Func<Task> action) =>
